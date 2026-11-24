@@ -37,6 +37,7 @@ th:first-child,td:first-child{text-align:left}tr.sc{cursor:pointer}tr.sc:hover{b
 <div class="card"><div id="chart"></div></div>
 <div class="card"><h3>Backtest (last ~500 candles, fees included, closed candles only)</h3><div id="bt"></div></div>
 </div><div>
+<div class="card" style="border-color:var(--g)"><h3>Can enter now (all timeframes)</h3><div id="enter" class="mut">Loading…</div></div>
 <div class="card"><h3>Now</h3><div id="now"></div></div>
 <div class="card"><h3>Best coins for this strategy (backtest net %, click a bar)</h3><div id="rank" style="max-height:340px;overflow:auto"></div><div class="mut">Green = strategy made money on that coin recently (after fees). Grey = under 5 trades. ▶ = signal firing now. Past results; not a promise.</div></div>
 <div class="card"><h3>Scanner (click a row)</h3><div style="max-height:520px;overflow:auto"><table id="scan"></table></div></div>
@@ -75,8 +76,8 @@ function supertrend(C,m=3){const at=atr(C,10),N=C.length,dir=Array(N).fill(0);le
   fu=(bu<pu||C[i-1].c>pu)?bu:pu;fl=(bl>pl||C[i-1].c<pl)?bl:pl;d=d===1?(C[i].c<fl?-1:1):(C[i].c>fu?1:-1);dir[i]=d}return dir}
 // ---------- strategy: EMA9/21 trend + RSI14 momentum + VWAP side (all 3 must agree) ----------
 // Quality filter (from research.mjs, tested on 50 futures coins): 5m ADX>25 + strong close; 15m ADX>20 + Supertrend; 1h EMA200 side + strong close
-function analyze(C){const c=C.map(k=>k.c),e9=ema(c,9),e21=ema(c,21),rs=rsi(c),vw=vwap(C),at=atr(C);
- const q=typeof QF==='function'&&QF(),ax=adx(C),st=supertrend(C),e200=ema(c,200),pos=C.map(k=>(k.c-k.l)/((k.h-k.l)||1)),
+function analyze(C,qtf){const c=C.map(k=>k.c),e9=ema(c,9),e21=ema(c,21),rs=rsi(c),vw=vwap(C),at=atr(C);
+ const q=qtf!==undefined?qtf:typeof QF==='function'&&QF(),ax=adx(C),st=supertrend(C),e200=ema(c,200),pos=C.map(k=>(k.c-k.l)/((k.h-k.l)||1)),
   strong=(i,d)=>d>0?pos[i]>.6:pos[i]<.4,
   qok=(i,d)=>!q||(q==='5m'?ax[i]>25&&strong(i,d):q==='15m'?ax[i]>20&&st[i]===d:q==='1h'?d*(c[i]-e200[i])>0&&strong(i,d):true);
  const L=[],S=[],sig=[];
@@ -115,7 +116,7 @@ function hbias(s,t){const C=hc[s+t];if(!C||C.length<60)return;const c=C.slice(0,
  return c[i]>e50[i]&&e20[i]>e50[i]&&r[i]>50?1:c[i]<e50[i]&&e20[i]<e50[i]&&r[i]<50?-1:0}
 async function loadHTF(){await Promise.all(SYMS.flatMap(s=>['4h','1d'].map(async t=>{try{hc[s+t]=await load(s,t)}catch{}})))}
 const hb=b=>b>0?'<span class="ok">▲</span>':b<0?'<span class="no">▼</span>':'<span class="mut">–</span>';
-async function refresh(){const tf=$('tf').value;if(Date.now()-hts>300000){hts=Date.now();loadHTF().then(render)}try{
+async function refresh(){const tf=$('tf').value;if(Date.now()-hts>300000){hts=Date.now();loadHTF().then(render)}if(Date.now()-ats>60000){ats=Date.now();loadOthers().then(render)}try{
  await Promise.all(SYMS.map(async s=>cache[s+tf]=await load(s,tf)));$('st').textContent='updated '+new Date().toLocaleTimeString();}
  catch(e){$('st').textContent='data error: '+e.message}render()}
 
@@ -155,12 +156,32 @@ function render(){const sym=$('sym').value||SYMS[0],tf=$('tf').value,p=P(),raw=c
  [...SYMS].sort((a,b)=>rk(b)-rk(a)).forEach(s=>{const R=cache[s+tf];if(!R)return;const c2=R.slice(0,-1),B=analyze(c2),n=c2.length-1,
   ls=B.L[n].filter(Boolean).length,ss=B.S[n].filter(Boolean).length,sg=B.sig[n],ok=sg&&(sg>0||p.shorts)&&plan(R[R.length-1].o,B.at[n],sg,p).ok;
   rows+=`<tr class="sc" onclick="$('sym').value='${s}';render()"><td>${s.replace('USDT','')}<td>${fmt(R[R.length-1].c)}<td>${B.rs[n].toFixed(0)}<td>${ls}/3<td>${ss}/3<td>${hb(hbias(s,'4h'))}<td>${hb(hbias(s,'1d'))}<td class="${ok?(sg>0?'ok':'no'):'mut'}">${ok?(sg>0?'LONG':'SHORT')+(hbias(s,'4h')===sg&&hbias(s,'1d')===sg?' ✔✔':''):'—'}</tr>`;
-  const key=s+tf+c2[n].t;if(ok&&!lastAlert[key]){lastAlert[key]=1;if(Object.keys(lastAlert).length>1&&window.armed)ping(s,sg)}});
+  });
  $('scan').innerHTML=rows;
  const rk2=SYMS.filter(s=>cache[s+tf]).map(s=>{const c2=cache[s+tf].slice(0,-1),B=analyze(c2),T=backtest(c2,B,p),net=T.reduce((a,x)=>a+x.pnl,0),n=c2.length-1,g=B.sig[n];
   return{s,net,n:T.length,now:g&&(g>0||p.shorts)}}).sort((a,b)=>b.net-a.net),mx=Math.max(1,...rk2.map(x=>Math.abs(x.net)));
- $('rank').innerHTML=rk2.map(x=>`<div onclick="$('sym').value='${x.s}';render()" style="cursor:pointer;display:flex;align-items:center;gap:6px;margin:2px 0${x.s===sym?';outline:1px solid var(--y)':''}"><span style="width:52px">${x.now?'▶ ':''}${x.s.replace('USDT','')}</span><div style="flex:1;height:10px;background:#ffffff0a"><div style="width:${Math.abs(x.net)/mx*100}%;height:100%;background:${x.n<5?'#667':x.net>=0?'var(--g)':'var(--r)'};margin-left:${x.net>=0?0:'auto'}"></div></div><span style="width:70px;text-align:right" class="mut">${x.net.toFixed(1)}% (${x.n})</span></div>`).join('')}
-function ping(s,d){const t=`${d>0?'LONG':'SHORT'} signal ${s} (${$('tf').value})`;
+ $('rank').innerHTML=rk2.map(x=>`<div onclick="$('sym').value='${x.s}';render()" style="cursor:pointer;display:flex;align-items:center;gap:6px;margin:2px 0${x.s===sym?';outline:1px solid var(--y)':''}"><span style="width:52px">${x.now?'▶ ':''}${x.s.replace('USDT','')}</span><div style="flex:1;height:10px;background:#ffffff0a"><div style="width:${Math.abs(x.net)/mx*100}%;height:100%;background:${x.n<5?'#667':x.net>=0?'var(--g)':'var(--r)'};margin-left:${x.net>=0?0:'auto'}"></div></div><span style="width:70px;text-align:right" class="mut">${x.net.toFixed(1)}% (${x.n})</span></div>`).join('');renderEnter()}
+// "Can enter now": fresh (<=1 candle) signals on 5m/15m/1h, all 3 checks still true, fee gate ok,
+// and the coin's own backtest strong (>=10 trades, net>0, profit factor>=1.3) with a stop <=4%
+const TFS=['5m','15m','1h'];let ats=0,enterSeen=null;
+async function loadOthers(){const tf=$('tf').value;await Promise.all(SYMS.flatMap(s=>TFS.filter(t=>t!==tf).map(async t=>{try{cache[s+t]=await load(s,t)}catch{}})))}
+function renderEnter(){const p=P(),qq=$('q').checked,rows=[];let weak=0,have=0;
+ TFS.forEach(tf=>SYMS.forEach(s=>{const R=cache[s+tf];if(!R||R.length<250)return;have++;const C=R.slice(0,-1),A=analyze(C,qq?tf:0),n=C.length-1;
+  let g=0,age=9;for(let j=n;j>=n-1;j--)if(A.sig[j]){g=A.sig[j];age=n-j;break}
+  if(!g||(g<0&&!p.shorts)||!(g>0?A.L[n]:A.S[n]).every(Boolean))return;
+  const px=R[R.length-1].c,pl=plan(px,A.at[n],g,p);if(!pl.ok)return;
+  const T=backtest(C,A,p),w=T.filter(x=>x.pnl>0),gp=w.reduce((a,x)=>a+x.pnl,0),gl=-T.filter(x=>x.pnl<=0).reduce((a,x)=>a+x.pnl,0),pf=gl?gp/gl:99,net=T.reduce((a,x)=>a+x.pnl,0),slp=Math.abs(px-pl.sl)/px*100;
+  if(T.length<10||pf<1.3||net<=0||slp>4){weak++;return}
+  rows.push({s,tf,g,age,px,pl,pf,net,n:T.length,slp,t:C[n].t,al:hbias(s,'4h')===g&&hbias(s,'1d')===g})}));
+ rows.sort((a,b)=>b.al-a.al||b.pf-a.pf);
+ const seen=new Set(rows.map(r=>r.s+r.tf+r.t));if(enterSeen&&window.armed)rows.forEach(r=>{if(!enterSeen.has(r.s+r.tf+r.t))ping(r.s,r.g,r.tf)});enterSeen=seen;
+ const risk=$('acc').value*$('risk').value/100;
+ $('enter').innerHTML=(have?'':'Loading timeframes…')+rows.slice(0,12).map(r=>`<div onclick="$('sym').value='${r.s}';$('tf').value='${r.tf}';refresh()" style="cursor:pointer;padding:6px 0;border-bottom:1px solid var(--b)">
+  <div><b class="${r.g>0?'ok':'no'}">${r.g>0?'LONG':'SHORT'}</b> <b>${r.s.replace('USDT','')}</b> ${r.tf} <span class="mut">· ${r.age?'1 candle old':'fresh'} · PF ${r.pf.toFixed(2)} (${r.net.toFixed(1)}%, ${r.n} trades)</span> ${r.al?'<b class="ok">✔✔ swing-aligned</b>':'<span class="mut">swing not aligned: smaller size</span>'}</div>
+  <div class="mut">in ${fmt(r.px)} · <span class="no">SL ${fmt(r.pl.sl)}</span> (${r.slp.toFixed(1)}%) · <span class="ok">TP ${fmt(r.pl.tp)}</span> · size ≈ $${(risk/(r.slp/100)).toFixed(0)}</div></div>`).join('')
+  +(rows.length?'':have?'<div>Nothing meets all the rules right now. Waiting is a valid position.</div>':'')
+  +`<div class="mut" style="margin-top:4px">${weak} weaker signals hidden (history too thin/negative, or stop over 4%). Tap a row to open its chart.</div>`}
+function ping(s,d,tf){const t=`${d>0?'LONG':'SHORT'} entry ${s.replace('USDT','')} (${tf})`;
  try{const o=actx.createOscillator();o.connect(actx.destination);o.frequency.value=d>0?880:440;o.start();o.stop(actx.currentTime+.4)}catch{}
  try{navigator.vibrate&&navigator.vibrate([200,100,200])}catch{}
  try{if(Notification.permission==='granted')new Notification(t)}catch{}document.title=t}
