@@ -22,6 +22,9 @@ Extra confirmations picked by `research.mjs` (backtests 12 filters + all pairs o
 - 1h: price on the right side of EMA200 and strong close.
 Uncheck it to see raw signals. Swing bias (4h/1d columns) is a separate manual check.
 
+## What the bigger test found (research2.mjs, 50 futures coins, 16 days of 5m / 47 days of 15m / 187 days of 1h)
+Settings were chosen on the older 60% of time and graded on the newer 40%. Pooled over all coins, quality-filtered signals: profit factor 5m 0.91 then 1.16, 15m 0.91 then 0.96, 1h 0.95 then 1.08 (older then newer). No exit setting (stop size, reward:risk, hold time) and none of 8 extra filters (stochastic RSI, Bollinger %B, OBV, volatility regime, BTC regime, RSI slope, RSI band, 4h trend) held up. The earlier "profit factor 1.37" on 5m came from a 5-day window and mostly did not repeat. Signals did best in the recent strong sell-off, so treat this as a trend-following tool that loses in chop. Per-coin profit factors (15-30 trades) are mostly noise.
+
 ## Your routine (per trade)
 1. Pick 5m (or 1m) and watch the Scanner. Wait for LONG/SHORT in the Signal column.
 2. Click that coin. Check: green "Fee gate passed", Signal age 0 or 1 candle, backtest panel not deep red.

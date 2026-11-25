@@ -180,7 +180,7 @@ function renderEnter(){const p=P(),qq=$('q').checked,rows=[];let weak=0,have=0;
   <div><b class="${r.g>0?'ok':'no'}">${r.g>0?'LONG':'SHORT'}</b> <b>${r.s.replace('USDT','')}</b> ${r.tf} <span class="mut">· ${r.age?'1 candle old':'fresh'} · PF ${r.pf.toFixed(2)} (${r.net.toFixed(1)}%, ${r.n} trades)</span> ${r.al?'<b class="ok">✔✔ swing-aligned</b>':'<span class="mut">swing not aligned: smaller size</span>'}</div>
   <div class="mut">in ${fmt(r.px)} · <span class="no">SL ${fmt(r.pl.sl)}</span> (${r.slp.toFixed(1)}%) · <span class="ok">TP ${fmt(r.pl.tp)}</span> · size ≈ $${(risk/(r.slp/100)).toFixed(0)}</div></div>`).join('')
   +(rows.length?'':have?'<div>Nothing meets all the rules right now. Waiting is a valid position.</div>':'')
-  +`<div class="mut" style="margin-top:4px">${weak} weaker signals hidden (history too thin/negative, or stop over 4%). Tap a row to open its chart.</div>`}
+  +`<div class="mut" style="margin-top:4px">${weak} weaker signals hidden (history too thin/negative, or stop over 4%). Tap a row to open its chart.</div><div class="mut" style="margin-top:4px"><b>Caveat:</b> each coin's history is only ~15-30 trades, which is mostly noise. Tests across all 50 coins over weeks found no proven edge outside strong trends. Small size, stop on the exchange, always.</div>`}
 function ping(s,d,tf){const t=`${d>0?'LONG':'SHORT'} entry ${s.replace('USDT','')} (${tf})`;
  try{const o=actx.createOscillator();o.connect(actx.destination);o.frequency.value=d>0?880:440;o.start();o.stop(actx.currentTime+.4)}catch{}
  try{navigator.vibrate&&navigator.vibrate([200,100,200])}catch{}
