@@ -26,8 +26,9 @@ th:first-child,td:first-child{text-align:left}tr.sc{cursor:pointer}tr.sc:hover{b
 <header><b>SCALP SIGNALS</b>
 <label>Coin <select id="sym"></select></label>
 <label title="Auto: Trend-flip on 5m, Pullback on 15m and 1h (the better one on the older data in the 50-coin test)">Strategy <select id="strat"><option value="auto" selected>Auto (best per timeframe)<option value="pb">Pullback<option value="flip">Trend-flip</select></label>
+<label title="Which strategies feed the signal room: all six, only those that made money on the newer data in the 50-coin test (per timeframe; picked with hindsight, none made money on both halves), or just the one picked in Strategy">Room <select id="room"><option value="all" selected>All strategies<option value="held">Newer-data winners<option value="auto">Strategy above</select></label>
 <label title="How many of the biggest futures coins to scan. Fewer = lighter on your phone and on Binance.">Coins <select id="topn"><option>20<option>30<option selected>50</select></label>
-<label title="Only show coins whose backtest with the current strategy won at least this % of 10+ trades. 0 = off (then coins are filtered by profit factor 1.3+ instead)">Min win % <input id="minwin" type="number" min="0" max="100" value="90" style="width:58px"></label>
+<label title="Only show coins whose backtest with the current strategy won at least this % of 10+ trades. 0 = off (then coins are filtered by profit factor 1.3+ instead)">Min win % <input id="minwin" type="number" min="0" max="100" value="0" style="width:58px"></label>
 <label title="Extra futures coins to always include, e.g. AAVE,SUI (crypto USDT perpetuals only)">Watchlist <input id="watch" placeholder="AAVE,SUI" style="width:96px"></label>
 <label>Timeframe <select id="tf"><option>1m<option selected>5m<option>15m<option>1h<option>4h</select></label>
 <label>Fee %/side <input id="fee" type="number" step="0.01" value="0.05"></label>
@@ -43,7 +44,8 @@ th:first-child,td:first-child{text-align:left}tr.sc{cursor:pointer}tr.sc:hover{b
 <div class="card"><h3>Backtest (last ~500 candles, fees included, closed candles only)</h3><div id="bt"></div></div>
 </div><div>
 <div class="card" id="mkt"></div>
-<div class="card" style="border-color:var(--g)"><h3>Can enter now (all timeframes)</h3><div id="enter" class="mut">Loading…</div></div>
+<div class="card" style="border-color:var(--g)"><h3>Signal room (5m, 15m, 1h)</h3><div id="enter" class="mut">Loading…</div></div>
+<div class="card"><h3>Paper trading log (live test of every signal above)</h3><div id="paper" class="mut"></div><button id="clearpaper" style="margin-top:6px">Clear log</button></div>
 <div class="card"><h3>Now</h3><div id="now"></div></div>
 <div class="card"><h3>Best coins for this strategy (backtest net %, click a bar)</h3><div id="rank" style="max-height:340px;overflow:auto"></div><div class="mut">Green = strategy made money on that coin recently (after fees). Grey = under 5 trades. ▶ = signal firing now. Past results; not a promise.</div></div>
 <div class="card"><h3>Scanner (click a row)</h3><div style="max-height:520px;overflow:auto"><table id="scan"></table></div></div>
@@ -83,11 +85,11 @@ function supertrend(C,m=3){const at=atr(C,10),N=C.length,dir=Array(N).fill(0);le
   fu=(bu<pu||C[i-1].c>pu)?bu:pu;fl=(bl>pl||C[i-1].c<pl)?bl:pl;d=d===1?(C[i].c<fl?-1:1):(C[i].c>fu?1:-1);dir[i]=d}return dir}
 // ---------- strategy: EMA9/21 trend + RSI14 momentum + VWAP side (all 3 must agree) ----------
 // Quality filter (from research.mjs, tested on 50 futures coins): 5m ADX>25 + strong close; 15m ADX>20 + Supertrend; 1h EMA200 side + strong close
-function analyze(C,qtf){const c=C.map(k=>k.c),e9=ema(c,9),e21=ema(c,21),rs=rsi(c),vw=vwap(C),at=atr(C);
+function analyze(C,qtf,fm){const c=C.map(k=>k.c),e9=ema(c,9),e21=ema(c,21),rs=rsi(c),vw=vwap(C),at=atr(C);
  const q=qtf!==undefined?qtf:typeof QF==='function'&&QF(),ax=adx(C),st=supertrend(C),e200=ema(c,200),pos=C.map(k=>(k.c-k.l)/((k.h-k.l)||1)),
   strong=(i,d)=>d>0?pos[i]>.6:pos[i]<.4,
   qok=(i,d)=>!q||(q==='5m'?ax[i]>25&&strong(i,d):q==='15m'?ax[i]>20&&st[i]===d:q==='1h'?d*(c[i]-e200[i])>0&&strong(i,d):true);
- const per=C.length>1?C[1].t-C[0].t:0,mode=typeof SM==='function'?SM(per):'flip',pb=mode==='pb'&&typeof PB==='function'?PB():0,e50=ema(c,50),L=[],S=[],sig=[],ext=[],rgk=pb&&typeof RGK==='function'?RGK(C):null;
+ const per=C.length>1?C[1].t-C[0].t:0,mode=fm||(typeof SM==='function'?SM(per):'flip'),pb=mode==='pb'&&typeof PB==='function'?PB():0,e50=ema(c,50),L=[],S=[],sig=[],ext=[],rgk=pb&&typeof RGK==='function'?RGK(C):null;
  if(pb){ // PULLBACK: trend (EMA21 vs EMA50 rising) + dip to the EMA within 6 bars with RSI cooled + trigger candle; stop beyond the pullback extreme
   const ref=pb.depth===50?e50:e21;
   C.forEach((k,i)=>{sig[i]=0;L[i]=[false,false,false];S[i]=[false,false,false];if(i<210||!(at[i]>0))return;
@@ -100,6 +102,23 @@ function analyze(C,qtf){const c=C.map(k=>k.c),e9=ema(c,9),e21=ema(c,21),rs=rsi(c
   const lo=i>50&&L[i].every(Boolean)&&!L[i-1].every(Boolean),so=i>50&&S[i].every(Boolean)&&!S[i-1].every(Boolean);
   const d=lo?1:so?-1:0;sig[i]=d&&qok(i,d)?d:0});
  return{c,e9,e21,e50,rs,vw,at,L,S,sig,ax,st,ext,mode:pb?'pb':'flip',ok:(i,d)=>pb?sig[i]===d||sig[i-1]===d:(d>0?L:S)[i].every(Boolean)}}
+// ---------- extra strategies for the signal room (fixed definitions, no tuning; tested in research8.mjs) ----------
+// brk: first close beyond the previous 20-candle high/low with ADX>20 | st: Supertrend(10,3) flips, price on the right side of EMA50
+// sqz: Bollinger(20,2) width was in its lowest 20% of the last 100 candles within the last 5, then a close outside the band, on the right side of EMA21
+// vwp: close crosses VWAP in the direction of the trend (EMA21 vs EMA50). All exit like trend-flip: stop 1.5 ATR, target RR x stop.
+function extraSignals(name,C,A){const N=C.length,c=C.map(k=>k.c),sig=Array(N).fill(0),{at,ax,e21,e50,vw,st}=A;
+ if(name==='brk'){for(let i=25;i<N;i++){if(!(at[i]>0)||!(ax[i]>20))continue;let hi=-Infinity,lo=Infinity,hi1=-Infinity,lo1=Infinity;
+   for(let j=i-20;j<i;j++){hi=Math.max(hi,C[j].h);lo=Math.min(lo,C[j].l)}for(let j=i-21;j<i-1;j++){hi1=Math.max(hi1,C[j].h);lo1=Math.min(lo1,C[j].l)}
+   if(c[i]>hi&&!(c[i-1]>hi1))sig[i]=1;else if(c[i]<lo&&!(c[i-1]<lo1))sig[i]=-1}}
+ else if(name==='st'){for(let i=60;i<N;i++){if(!(at[i]>0))continue;if(st[i]===1&&st[i-1]===-1&&c[i]>e50[i])sig[i]=1;else if(st[i]===-1&&st[i-1]===1&&c[i]<e50[i])sig[i]=-1}}
+ else if(name==='vwp'){for(let i=60;i<N;i++){if(!(at[i]>0))continue;if(c[i-1]<vw[i-1]&&c[i]>vw[i]&&e21[i]>e50[i])sig[i]=1;else if(c[i-1]>vw[i-1]&&c[i]<vw[i]&&e21[i]<e50[i])sig[i]=-1}}
+ else if(name==='sqz'){const sma=[],sd=[],bw=[];for(let i=0;i<N;i++){if(i<19){sma[i]=sd[i]=bw[i]=NaN;continue}let m=0;for(let j=i-19;j<=i;j++)m+=c[j];m/=20;let v=0;for(let j=i-19;j<=i;j++)v+=(c[j]-m)**2;sma[i]=m;sd[i]=Math.sqrt(v/20);bw[i]=4*sd[i]/m}
+  for(let i=120;i<N;i++){if(!(at[i]>0))continue;const w=bw.slice(i-100,i).sort((a,b)=>a-b),q=w[20];let sq=false;for(let j=i-5;j<i;j++)if(bw[j]<=q)sq=true;if(!sq)continue;
+   if(c[i]>sma[i]+2*sd[i]&&!(c[i-1]>sma[i-1]+2*sd[i-1])&&c[i]>e21[i])sig[i]=1;else if(c[i]<sma[i]-2*sd[i]&&!(c[i-1]<sma[i-1]-2*sd[i-1])&&c[i]<e21[i])sig[i]=-1}}
+ return{...A,sig,ext:[],mode:name,ok:(i,d)=>sig[i]===d||sig[i-1]===d}}
+const SNAME={flip:'trend-flip',pb:'pullback',brk:'breakout',st:'supertrend',sqz:'squeeze',vwp:'VWAP reclaim'};
+// one analysis per strategy name: flip with the quality filter, pullback, or one of the extras on top of the plain analysis
+const analyzeS=(name,C,tf,qq)=>name==='flip'?analyze(C,qq?tf:0,'flip'):name==='pb'?analyze(C,0,'pb'):extraSignals(name,C,analyze(C,0,'flip'));
 const QF=()=>$('q').checked?$('tf').value:0;
 const PB=()=>({depth:21,rsi:45,adx:0});
 // strategy per candle size: fixed by the dropdown, or in Auto the one that did better on the older data (research6.mjs): 5m trend-flip, 15m and 1h pullback
@@ -214,24 +233,47 @@ function render(){const sym=$('sym').value||SYMS[0],tf=$('tf').value,p=P(),raw=c
 // and the coin's own backtest strong (>=10 trades, net>0, profit factor>=1.3) with a stop <=4%
 const TFS=['5m','15m','1h'];let ats=0,enterSeen=null;
 async function loadOthers(){const tf=$('tf').value;await Promise.all(SYMS.flatMap(s=>TFS.filter(t=>t!==tf).map(async t=>{try{cache[s+t]=await load(s,t)}catch{}})))}
-function renderEnter(){const p=P(),qq=$('q').checked,mw=+$('minwin').value||0,rows=[],near=[];let weak=0,have=0;
- TFS.forEach(tf=>SYMS.forEach(s=>{const R=cache[s+tf];if(!R||R.length<250)return;have++;const C=R.slice(0,-1),A=analyze(C,qq?tf:0),n=C.length-1;
-  let g=0,age=9;for(let j=n;j>=n-1;j--)if(A.sig[j]){g=A.sig[j];age=n-j;break}
-  if(!g||(g<0&&!p.shorts)||!A.ok(n,g))return;
-  const px=R[R.length-1].c,pl=plan(px,A.at[n],g,p,A.ext[n-age]);if(!pl.ok)return;
-  const T=backtest(C,A,p),w=T.filter(x=>x.pnl>0),gp=w.reduce((a,x)=>a+x.pnl,0),gl=-T.filter(x=>x.pnl<=0).reduce((a,x)=>a+x.pnl,0),pf=gl?gp/gl:99,net=T.reduce((a,x)=>a+x.pnl,0),slp=Math.abs(px-pl.sl)/px*100;
-  const wrt=T.length?w.length/T.length*100:0;
+// SIGNAL ROOM: fresh (<=1 candle) signals from several strategies on 5m/15m/1h, fee gate ok, stop <=4%, and the coin's own backtest
+// with that strategy strong (10+ trades; win rate >= "Min win %" if set, else net>0 and profit factor>=1.3). Each row shows how the
+// strategy did on newer data in the 50-coin test (TESTED, from research8.mjs). Results are cached per candle so the room stays light.
+const TESTED={"5m":{"flip":{"isPf":0.9,"oosPf":1.21},"pb":{"isPf":0.86,"oosPf":0.95},"brk":{"isPf":0.76,"oosPf":0.88},"st":{"isPf":0.75,"oosPf":0.92},"sqz":{"isPf":0.77,"oosPf":0.93},"vwp":{"isPf":0.94,"oosPf":0.92}},"15m":{"flip":{"isPf":0.89,"oosPf":0.98},"pb":{"isPf":0.92,"oosPf":0.91},"brk":{"isPf":0.88,"oosPf":0.95},"st":{"isPf":0.96,"oosPf":0.86},"sqz":{"isPf":0.84,"oosPf":0.89},"vwp":{"isPf":0.78,"oosPf":0.96}},"1h":{"flip":{"isPf":0.91,"oosPf":1.09},"pb":{"isPf":0.96,"oosPf":0.89},"brk":{"isPf":0.92,"oosPf":0.92},"st":{"isPf":0.76,"oosPf":0.94},"sqz":{"isPf":0.81,"oosPf":1.05},"vwp":{"isPf":0.87,"oosPf":1.05}}}; // profit factor on older 60% / newer 40% of the data, 50 coins (research8.mjs)
+const STRATS=tf=>{const v=$('room').value;return v==='auto'?[SM(PERIOD[tf])]:v==='held'?Object.keys(SNAME).filter(n=>((TESTED[tf]||{})[n]||{}).oosPf>=1):Object.keys(SNAME)};
+const memo=new Map();
+function roomStat(s,tf,name,R,p,qq){const key=[s,tf,name,qq,RGF(),p.fee,p.shorts,R.length,R[R.length-2].t].join('|');let m=memo.get(key);if(m)return m;
+ const C=R.slice(0,-1),A=analyzeS(name,C,tf,qq),n=C.length-1;let g=0,age=9;for(let j=n;j>=n-1;j--)if(A.sig[j]){g=A.sig[j];age=n-j;break}
+ m={g:0};if(g&&(g>0||p.shorts)&&A.ok(n,g)){const T=backtest(C,A,{...p,auto:true}),w=T.filter(x=>x.pnl>0),gp=w.reduce((a,x)=>a+x.pnl,0),gl=-T.filter(x=>x.pnl<=0).reduce((a,x)=>a+x.pnl,0);
+  m={g,age,a:A.at[n],ext:A.ext[n-age],t:C[n].t,n:T.length,wr:T.length?w.length/T.length*100:0,pf:gl?gp/gl:99,net:T.reduce((a,x)=>a+x.pnl,0)}}
+ memo.set(key,m);if(memo.size>2500)memo.delete(memo.keys().next().value);return m}
+function renderEnter(){const p={...P(),auto:true},qq=$('q').checked,mw=+$('minwin').value||0,rows=[],near=[];let weak=0,have=0;
+ TFS.forEach(tf=>{const names=STRATS(tf);SYMS.forEach(s=>{const R=cache[s+tf];if(!R||R.length<250)return;have++;names.forEach(name=>{const m=roomStat(s,tf,name,R,p,qq);if(!m.g)return;
+  const g=m.g,px=R[R.length-1].c,pl=plan(px,m.a,g,p,m.ext);if(!pl.ok)return;const slp=Math.abs(px-pl.sl)/px*100;
   // with a min win rate set, that rule replaces the profit-factor rule; either way needs 10+ past trades and a stop of 4% or less
-  if(T.length<10||slp>4||(mw?wrt<mw:(pf<1.3||net<=0))){weak++;if(T.length>=10&&slp<=4)near.push({s,tf,g,wr:wrt,n:T.length});return}
-  rows.push({s,tf,g,age,px,pl,pf,net,wr:wrt,n:T.length,slp,t:C[n].t,mode:A.mode,al:hbias(s,'4h')===g&&hbias(s,'1d')===g})}));
+  if(m.n<10||slp>4||(mw?m.wr<mw:(m.pf<1.3||m.net<=0))){weak++;if(m.n>=10&&slp<=4)near.push({s,tf,g,wr:m.wr,n:m.n});return}
+  rows.push({s,tf,g,age:m.age,px,pl,pf:m.pf,net:m.net,wr:m.wr,n:m.n,slp,t:m.t,name,tested:(TESTED[tf]||{})[name]||{},al:hbias(s,'4h')===g&&hbias(s,'1d')===g})})})});
  rows.sort((a,b)=>b.al-a.al||b.pf-a.pf);
- const seen=new Set(rows.map(r=>r.s+r.tf+r.t));if(enterSeen&&window.armed)rows.forEach(r=>{if(!enterSeen.has(r.s+r.tf+r.t))ping(r.s,r.g,r.tf)});enterSeen=seen;
+ const seen=new Set(rows.map(r=>r.s+r.tf+r.name+r.t));if(enterSeen&&window.armed)rows.forEach(r=>{if(!enterSeen.has(r.s+r.tf+r.name+r.t))ping(r.s,r.g,r.tf)});enterSeen=seen;
+ trackPaper(rows);renderPaper();
  const risk=$('acc').value*$('risk').value/100;
  $('enter').innerHTML=(have?'':'Loading timeframes…')+rows.slice(0,12).map(r=>`<div onclick="$('sym').value='${r.s}';$('tf').value='${r.tf}';refresh()" style="cursor:pointer;padding:6px 0;border-bottom:1px solid var(--b)">
-  <div><b class="${r.g>0?'ok':'no'}">${r.g>0?'LONG':'SHORT'}</b> <b>${r.s.replace('USDT','')}</b> ${r.tf} <span class="mut">· ${r.mode==='pb'?'pullback':'trend-flip'} · ${r.age?'1 candle old':'fresh'} · win ${r.wr.toFixed(0)}% · PF ${r.pf.toFixed(2)} (${r.net.toFixed(1)}%, ${r.n} trades)</span> ${r.al?'<b class="ok">✔✔ swing-aligned</b>':'<span class="mut">swing not aligned: smaller size</span>'}</div>
+  <div><b class="${r.g>0?'ok':'no'}">${r.g>0?'LONG':'SHORT'}</b> <b>${r.s.replace('USDT','')}</b> ${r.tf} <span class="mut">·</span> <b>${SNAME[r.name]}</b> <span class="mut">· ${r.age?'1 candle old':'fresh'} · win ${r.wr.toFixed(0)}% · PF ${r.pf.toFixed(2)} (${r.net.toFixed(1)}%, ${r.n} trades)</span> <span style="color:${r.tested.isPf>=1&&r.tested.oosPf>=1?'var(--g)':r.tested.oosPf>=1?'var(--y)':'var(--r)'}" title="Profit factor of this strategy over 50 coins on the older 60% / newer 40% of the data. Above 1 = made money. Green = both, yellow = newer only, red = neither.">tested ${r.tested.isPf==null?'?':r.tested.isPf.toFixed(2)} / ${r.tested.oosPf==null?'?':r.tested.oosPf.toFixed(2)}</span> ${r.al?'<b class="ok">✔✔ swing-aligned</b>':'<span class="mut">swing not aligned: smaller size</span>'}</div>
   <div class="mut">in ${fmt(r.px)} · <span class="no">SL ${fmt(r.pl.sl)}</span> (${r.slp.toFixed(1)}%) · <span class="ok">TP ${fmt(r.pl.tp)}</span> · size ≈ $${(risk/(r.slp/100)).toFixed(0)}</div></div>`).join('')
   +(rows.length?'':have?`<div>Nothing meets all the rules right now${mw?` (win rate ${mw}%+ over 10+ past trades)`:''}. Waiting is a valid position.</div>`+(mw&&near.length?`<div class="mut">Closest fresh signals by past win rate: ${near.sort((a,b)=>b.wr-a.wr).slice(0,3).map(r=>`${r.s.replace('USDT','')} ${r.tf} ${r.wr.toFixed(0)}% (${r.n} trades)`).join(', ')}.</div>`:''):'')
-  +`<div class="mut" style="margin-top:4px">${weak} weaker signals hidden (history too thin/negative, or stop over 4%). Tap a row to open its chart.</div><div class="mut" style="margin-top:4px"><b>Caveat:</b> ${p.auto?'Auto picks the strategy that did better on the older data in a 50-coin test (5m trend-flip, 15m and 1h pullback). On the newer data that gave profit factors of 1.21 (5m), 0.91 (15m) and 0.89 (1h): only one is above 1.':'Neither strategy showed a proven edge in the 50-coin tests.'} Requiring a trending market did not help. ${mw?`Win-rate filter: in the 50-coin test no coin reached 90% (best 52-59%, typical 35-40%) and a coin's past win rate did not predict its future win rate (correlation 0.04, -0.11, 0.27).`:''} Each coin's own history is only ~15-30 trades, mostly noise. Paper-trade first, small size, stop on the exchange, always.</div>`}
+  +`<div class="mut" style="margin-top:4px">${weak} weaker signals hidden (history too thin/negative, or stop over 4%). Tap a row to open its chart.</div><div class="mut" style="margin-top:4px"><b>Caveat:</b> "tested" shows each strategy's profit factor over 50 coins on older / newer data (above 1 made money, below 1 lost after fees). All six lost on the older data and only four setups made money on the newer data, so none is proven. Requiring a trending market did not help. ${mw?`Win-rate filter: in the 50-coin test no coin reached 90% (best 52-59%, typical 35-40%) and a coin's past win rate did not predict its future win rate (correlation 0.04, -0.11, 0.27).`:''} Each coin's own history is only ~15-30 trades, mostly noise. Paper-trade first, small size, stop on the exchange, always.</div>`}
+// PAPER TRACKER: every signal the room shows is logged on this device with its entry/stop/target and settled by later candles
+// (stop first if both hit in one candle, or closed after 30/40 candles). It builds a real forward test of each strategy.
+let paper=[];try{paper=JSON.parse(localStorage.getItem('scalp_paper')||'[]')}catch{}
+const savePaper=()=>{try{localStorage.setItem('scalp_paper',JSON.stringify(paper.slice(-400)))}catch{}};
+function trackPaper(rows){const now=Date.now()/1000,fee=P().fee;
+ rows.forEach(r=>{const id=[r.s,r.tf,r.name,r.t].join('|');if(!paper.some(x=>x.id===id))paper.push({id,s:r.s,tf:r.tf,name:r.name,d:r.g,at:now,entry:r.px,sl:r.pl.sl,tp:r.pl.tp,st:'open'})});
+ paper.forEach(x=>{if(x.st!=='open')return;const R=cache[x.s+x.tf];if(!R)return;let n=0;
+  for(const k of R.slice(0,-1)){if(k.t<=x.at)continue;n++;let ex=null,st=null;
+   if(x.d>0?k.l<=x.sl:k.h>=x.sl){ex=x.sl;st='sl'}else if(x.d>0?k.h>=x.tp:k.l<=x.tp){ex=x.tp;st='tp'}else if(n>=(x.name==='pb'?40:30)){ex=k.c;st='time'}
+   if(st){x.st=st;x.pnl=x.d*(ex-x.entry)/x.entry*100-2*fee*100;break}}});savePaper()}
+function renderPaper(){const by={};paper.forEach(x=>{const b=by[x.name]=by[x.name]||{n:0,w:0,gp:0,gl:0,net:0,open:0};if(x.st==='open'){b.open++;return}b.n++;if(x.pnl>0){b.w++;b.gp+=x.pnl}else b.gl-=x.pnl;b.net+=x.pnl});
+ const names=Object.keys(by);const last=[...paper].reverse().slice(0,6);
+ $('paper').innerHTML=names.length?`<table><tr class="mut"><th>Strategy<th>Done<th>Win<th>PF<th>Net<th>Open</tr>${names.map(k=>{const b=by[k];return`<tr><td>${SNAME[k]}<td>${b.n}<td>${b.n?(b.w/b.n*100).toFixed(0)+'%':'-'}<td>${b.gl?(b.gp/b.gl).toFixed(2):b.gp?'∞':'-'}<td class="${b.net>=0?'ok':'no'}">${b.net.toFixed(1)}%<td>${b.open}</tr>`}).join('')}</table>
+  <div style="margin-top:4px">${last.map(x=>`<div>${x.d>0?'LONG':'SHORT'} ${x.s.replace('USDT','')} ${x.tf} ${SNAME[x.name]}: ${x.st==='open'?'<span class="mut">open</span>':`<span class="${x.pnl>=0?'ok':'no'}">${x.st==='tp'?'target hit':x.st==='sl'?'stopped':'timed out'} ${x.pnl.toFixed(2)}%</span>`}</div>`).join('')}</div>`
+  :'No signals logged yet. Every signal the room shows while this app is open is recorded here and settled automatically.'}
 function ping(s,d,tf){const t=`${d>0?'LONG':'SHORT'} entry ${s.replace('USDT','')} (${tf})`;
  try{const o=actx.createOscillator();o.connect(actx.destination);o.frequency.value=d>0?880:440;o.start();o.stop(actx.currentTime+.4)}catch{}
  try{navigator.vibrate&&navigator.vibrate([200,100,200])}catch{}
@@ -242,10 +284,11 @@ $('alert').onclick=async()=>{actx=new AudioContext();window.armed=true;try{Notif
 document.addEventListener('visibilitychange',async()=>{if(window.armed&&document.visibilityState==='visible')try{window.wl=await navigator.wakeLock.request('screen')}catch{}});
 if('serviceWorker' in navigator&&location.protocol!=='file:')navigator.serviceWorker.register('sw.js').catch(()=>{});
 // settings are remembered on this device (phone or PC)
-const SAVE=['strat','tf','fee','rr','acc','risk','topn','watch','minwin','short','q','rg'];
+const SAVE=['strat','tf','fee','rr','acc','risk','topn','watch','minwin','room','short','q','rg'];
+$('clearpaper').onclick=()=>{if(confirm('Delete the whole paper trading log on this device?')){paper=[];savePaper();renderPaper()}};
 try{const s=JSON.parse(localStorage.getItem('scalp')||'{}');SAVE.forEach(id=>{if(id in s){const e=$(id);e.type==='checkbox'?e.checked=s[id]:e.value=s[id]}})}catch{}
 const save=()=>{try{const s={};SAVE.forEach(id=>{const e=$(id);s[id]=e.type==='checkbox'?e.checked:e.value});localStorage.setItem('scalp',JSON.stringify(s))}catch{}};
-['sym','tf','fee','rr','acc','risk','short','q','strat','rg','topn','watch','minwin'].forEach(id=>$(id).onchange=()=>{if(id==='strat'&&$('strat').value!=='auto')$('rr').value=$('strat').value==='pb'?2:1.5;save();
+['sym','tf','fee','rr','acc','risk','short','q','strat','rg','topn','watch','minwin','room'].forEach(id=>$(id).onchange=()=>{if(id==='strat'&&$('strat').value!=='auto')$('rr').value=$('strat').value==='pb'?2:1.5;save();
  if(id==='topn'||id==='watch'){const keep=$('sym').value;top50().then(()=>{if(SYMS.includes(keep))$('sym').value=keep;ats=0;hts=0;enterSeen=null;refresh()})}else id==='tf'?refresh():render()});
 top50().then(()=>{refresh();setInterval(refresh,15000)});
 </script></body></html>
