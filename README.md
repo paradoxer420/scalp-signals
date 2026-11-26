@@ -47,3 +47,6 @@ Idea built from the earlier findings: only take pullbacks WITH the market (top-5
 - **Range-market strategy tested and rejected** (research5.mjs): mean-reversion at Bollinger bands in low-ADX markets lost on both halves in every version (profit factor 0.73 to 0.94), so it is not in the app.
 - **Market state badge:** top-50 coins bullish vs bearish on 1h. Context only; it did not improve results in tests.
 - **Coins (20/30/50) and Watchlist** (extra crypto USDT perpetuals, e.g. AAVE,SUI): fewer coins is lighter on your phone and on Binance's rate limit. **Settings are remembered** on the device.
+
+## Min win % filter (research7.mjs)
+"Min win %" (default 90) hides every coin whose backtest with the current strategy did not win at least that share of 10+ trades. It applies to Can enter now, the scanner and the best-coins chart. Set it to 0 to go back to the profit-factor filter. In the 50-coin test (Auto strategies, older data) no coin reached 90%: best 52-59%, median 35-40%. A coin's older win rate did not predict its newer win rate (correlation 0.04 on 5m, -0.11 on 15m, 0.27 on 1h). These strategies win about 40% of the time on purpose and pay back about 2:1, so a 90% win rate would need tiny targets, which was not tested here.
