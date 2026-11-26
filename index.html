@@ -32,6 +32,7 @@ th:first-child,td:first-child{text-align:left}tr.sc{cursor:pointer}tr.sc:hover{b
 <label>Account $ <input id="acc" type="number" value="1000"></label>
 <label>Risk % <input id="risk" type="number" step="0.1" value="1"></label>
 <label><input id="short" type="checkbox" checked> shorts (futures)</label>
+<label title="Experimental, pullback only: trade only with the market (top-50 breadth 50%+ in your direction) and only the weakest third of coins for shorts / strongest third for longs. Passed 1 of 18 tests; probably luck."><input id="rg" type="checkbox"> regime filter (experimental)</label>
 <label title="5m: ADX>25 + strong close. 15m: ADX>20 + Supertrend. 1h: EMA200 side + strong close"><input id="q" type="checkbox" checked> quality filter</label>
 <button id="alert">Enable alerts</button><span id="st" class="mut"></span></header>
 <main><div>
@@ -81,7 +82,7 @@ function analyze(C,qtf){const c=C.map(k=>k.c),e9=ema(c,9),e21=ema(c,21),rs=rsi(c
  const q=qtf!==undefined?qtf:typeof QF==='function'&&QF(),ax=adx(C),st=supertrend(C),e200=ema(c,200),pos=C.map(k=>(k.c-k.l)/((k.h-k.l)||1)),
   strong=(i,d)=>d>0?pos[i]>.6:pos[i]<.4,
   qok=(i,d)=>!q||(q==='5m'?ax[i]>25&&strong(i,d):q==='15m'?ax[i]>20&&st[i]===d:q==='1h'?d*(c[i]-e200[i])>0&&strong(i,d):true);
- const pb=typeof PB==='function'&&PB(),e50=ema(c,50),L=[],S=[],sig=[],ext=[];
+ const pb=typeof PB==='function'&&PB(),e50=ema(c,50),L=[],S=[],sig=[],ext=[],rgk=pb&&typeof RGK==='function'?RGK(C):null;
  if(pb){ // PULLBACK: trend (EMA21 vs EMA50 rising) + dip to the EMA within 6 bars with RSI cooled + trigger candle; stop beyond the pullback extreme
   const ref=pb.depth===50?e50:e21;
   C.forEach((k,i)=>{sig[i]=0;L[i]=[false,false,false];S[i]=[false,false,false];if(i<210||!(at[i]>0))return;
@@ -89,7 +90,7 @@ function analyze(C,qtf){const c=C.map(k=>k.c),e9=ema(c,9),e21=ema(c,21),rs=rsi(c
     let touched=false,rsX=d>0?100:0,ex=d>0?Infinity:-Infinity;
     for(let j=i-6;j<i;j++){const b=C[j];if(d>0){if(b.l<=ref[j]+0.25*at[j])touched=true;rsX=Math.min(rsX,rs[j]);ex=Math.min(ex,b.l)}else{if(b.h>=ref[j]-0.25*at[j])touched=true;rsX=Math.max(rsX,rs[j]);ex=Math.max(ex,b.h)}}
     const pk=C[i-1],tg=d>0?k.c>pk.h&&k.c>ref[i]&&rs[i]>rs[i-1]:k.c<pk.l&&k.c<ref[i]&&rs[i]<rs[i-1],ok3=[tr&&(!pb.adx||ax[i]>pb.adx),touched&&(d>0?rsX<=pb.rsi:rsX>=100-pb.rsi),tg];
-    (d>0?L:S)[i]=ok3;if(ok3.every(Boolean)){sig[i]=d;ext[i]=ex;break}}})
+    (d>0?L:S)[i]=ok3;if(ok3.every(Boolean)&&(!rgk||rgk(i,d))){sig[i]=d;ext[i]=ex;break}}})
  }else C.forEach((k,i)=>{L[i]=[e9[i]>e21[i],k.c>vw[i],rs[i]>50&&rs[i]<70];S[i]=[e9[i]<e21[i],k.c<vw[i],rs[i]<50&&rs[i]>30];
   const lo=i>50&&L[i].every(Boolean)&&!L[i-1].every(Boolean),so=i>50&&S[i].every(Boolean)&&!S[i-1].every(Boolean);
   const d=lo?1:so?-1:0;sig[i]=d&&qok(i,d)?d:0});
@@ -122,6 +123,24 @@ function stats(T){if(!T.length)return'No trades in this window (fee gate or quie
 // ---------- data ----------
 async function load(sym,tf){const r=await fetch(`${API}?symbol=${sym}&interval=${tf}&limit=500`);if(!r.ok)throw new Error(r.status);
  return(await r.json()).map(k=>({t:k[0]/1000,o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]}))}
+// ---------- market-regime filter (experimental, pullback mode only; research4.mjs variant D) ----------
+// Only take pullbacks WITH the market: breadth of the top 50 (bullish minus bearish coins on 1h) at least 50% in the trade's direction,
+// and the coin's own 24h return in the weakest third (shorts) or strongest third (longs). Passed 1 of 18 tests (5m only): probably luck.
+const PERIOD={'5m':300,'15m':900,'1h':3600},RGF=()=>$('rg').checked&&$('strat').value==='pb';let RGX={bm:new Map(),rk:{}};
+function buildRegime(){const bm=new Map(),rk={};
+ SYMS.forEach(s=>{const R=cache[s+'1h'];if(!R||R.length<120)return;const C=R.slice(0,-1),c=C.map(k=>k.c),e20=ema(c,20),e50=ema(c,50),r=rsi(c);
+  C.forEach((k,i)=>{if(i<60)return;let e=bm.get(k.t);if(!e)bm.set(k.t,e={u:0,d:0,n:0});e.n++;
+   if(c[i]>e50[i]&&e20[i]>e50[i]&&r[i]>50)e.u++;else if(c[i]<e50[i]&&e20[i]<e50[i]&&r[i]<50)e.d++})});
+ ['5m','15m','1h'].forEach(tf=>{const m=new Map(),N=Math.round(86400/PERIOD[tf]);
+  SYMS.forEach(s=>{const R=cache[s+tf];if(!R)return;const C=R.slice(0,-1);for(let i=N;i<C.length;i++){let a=m.get(C[i].t);if(!a)m.set(C[i].t,a=[]);a.push(C[i].c/C[i-N].c-1)}});
+  m.forEach(a=>a.sort((x,y)=>x-y));rk[PERIOD[tf]]=m});
+ RGX={bm,rk}}
+const RGK=C=>{if(!RGF()||!RGX.bm.size||C.length<2)return null;const P=C[1].t-C[0].t,N=Math.round(86400/P),m=RGX.rk[P];
+ return(i,d)=>{const e=RGX.bm.get(Math.floor((C[i].t+P)/3600)*3600-3600);if(!e||e.n<20)return false;const b=(e.u-e.d)/e.n;if(Math.abs(b)<0.5||Math.sign(b)!==d)return false;
+  const a=m&&m.get(C[i].t);if(i<N||!a||a.length<20)return false;const r=C[i].c/C[i-N].c-1;let lo=0,hi=a.length;while(lo<hi){const x=(lo+hi)>>1;a[x]<r?lo=x+1:hi=x}
+  const pc=lo/a.length;return d>0?pc>=0.67:pc<=0.33}};
+const breadthNow=()=>{const b=cache['BTCUSDT1h'];if(!b||!RGX.bm.size)return null;const e=RGX.bm.get(b[b.length-2].t);return e&&e.n>=20?(e.u-e.d)/e.n:null};
+// end regime
 // swing bias on 4h/1d: close vs EMA50, EMA20 vs EMA50, RSI side (all agree = +1/-1, else 0)
 let hc={},hts=0;
 function hbias(s,t){const C=hc[s+t];if(!C||C.length<60)return;const c=C.slice(0,-1).map(k=>k.c),e20=ema(c,20),e50=ema(c,50),r=rsi(c),i=c.length-1;
@@ -138,7 +157,7 @@ const cs=chart.addCandlestickSeries({upColor:'#26a69a',downColor:'#ef5350',borde
 const l9=chart.addLineSeries({color:'#f0b90b',lineWidth:1,priceLineVisible:false}),l21=chart.addLineSeries({color:'#4aa3ff',lineWidth:1,priceLineVisible:false}),lv=chart.addLineSeries({color:'#b07cff',lineWidth:1,lineStyle:2,priceLineVisible:false});
 const fmt=v=>v>=100?v.toFixed(2):v>=1?v.toFixed(4):v.toFixed(6);
 
-function render(){const sym=$('sym').value||SYMS[0],tf=$('tf').value,p=P(),raw=cache[sym+tf];if(!raw)return;
+function render(){const sym=$('sym').value||SYMS[0],tf=$('tf').value,p=P(),raw=cache[sym+tf];if(!raw)return;if(RGF())buildRegime();
  const C=raw.slice(0,-1),A=analyze(C);
  cs.setData(raw.map(k=>({time:k.t,open:k.o,high:k.h,low:k.l,close:k.c})));
  const ln=a=>C.map((k,i)=>({time:k.t,value:a[i]})).slice(p.pb?60:21);l9.setData(ln(p.pb?A.e50:A.e9));l21.setData(ln(A.e21));lv.setData(ln(A.vw));
@@ -204,6 +223,6 @@ $('alert').onclick=async()=>{actx=new AudioContext();window.armed=true;try{Notif
  $('alert').textContent='Alerts ON (keep app open)'};
 document.addEventListener('visibilitychange',async()=>{if(window.armed&&document.visibilityState==='visible')try{window.wl=await navigator.wakeLock.request('screen')}catch{}});
 if('serviceWorker' in navigator&&location.protocol!=='file:')navigator.serviceWorker.register('sw.js').catch(()=>{});
-['sym','tf','fee','rr','acc','risk','short','q','strat'].forEach(id=>$(id).onchange=()=>{if(id==='strat')$('rr').value=$('strat').value==='pb'?2:1.5;id==='tf'?refresh():render()});
+['sym','tf','fee','rr','acc','risk','short','q','strat','rg'].forEach(id=>$(id).onchange=()=>{if(id==='strat')$('rr').value=$('strat').value==='pb'?2:1.5;id==='tf'?refresh():render()});
 top50().then(()=>{refresh();setInterval(refresh,15000)});
 </script></body></html>
