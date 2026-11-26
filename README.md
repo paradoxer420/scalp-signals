@@ -41,3 +41,9 @@ Backtests on the last ~500 candles (about 2 days on 5m) were mixed: some coins n
 
 ## Regime filter (experimental checkbox, off by default; research4.mjs)
 Idea built from the earlier findings: only take pullbacks WITH the market (top-50 breadth, bullish minus bearish coins on 1h, at least 50% in the trade's direction) and only the weakest third of coins for shorts or strongest third for longs (24h return). Fixed variants, older 60% vs newer 40%, 50 coins: 5m passed both halves (older 1.09, newer 1.22 at 0.05% fees), 15m and 1h did not (newer 0.87 and 0.66). 1 of 18 tests passing is what luck alone produces, so it stays an experiment. Choppy-market-only trading was the worst bucket on 5m/15m (older 0.74 / 0.80). Fees matter: at 0.02% per side every variant improves but only that same 5m cell stays above 1 on both halves.
+
+## Auto strategy, market state, watchlist (latest update)
+- **Auto (default):** picks the strategy per timeframe from what did better on the OLDER data of the 50-coin test (research6.mjs): 5m Trend-flip, 15m and 1h Pullback. On the NEWER data that gave profit factors 1.21 / 0.91 / 0.89, so only 5m is above 1. Requiring a trending market ("trade only with the market") made newer-data results worse (5m trend-flip 1.21 down to 0.85), so Auto does NOT gate on market state.
+- **Range-market strategy tested and rejected** (research5.mjs): mean-reversion at Bollinger bands in low-ADX markets lost on both halves in every version (profit factor 0.73 to 0.94), so it is not in the app.
+- **Market state badge:** top-50 coins bullish vs bearish on 1h. Context only; it did not improve results in tests.
+- **Coins (20/30/50) and Watchlist** (extra crypto USDT perpetuals, e.g. AAVE,SUI): fewer coins is lighter on your phone and on Binance's rate limit. **Settings are remembered** on the device.
