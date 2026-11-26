@@ -25,6 +25,10 @@ Uncheck it to see raw signals. Swing bias (4h/1d columns) is a separate manual c
 ## What the bigger test found (research2.mjs, 50 futures coins, 16 days of 5m / 47 days of 15m / 187 days of 1h)
 Settings were chosen on the older 60% of time and graded on the newer 40%. Pooled over all coins, quality-filtered signals: profit factor 5m 0.91 then 1.16, 15m 0.91 then 0.96, 1h 0.95 then 1.08 (older then newer). No exit setting (stop size, reward:risk, hold time) and none of 8 extra filters (stochastic RSI, Bollinger %B, OBV, volatility regime, BTC regime, RSI slope, RSI band, 4h trend) held up. The earlier "profit factor 1.37" on 5m came from a 5-day window and mostly did not repeat. Signals did best in the recent strong sell-off, so treat this as a trend-following tool that loses in chop. Per-coin profit factors (15-30 trades) are mostly noise.
 
+## Pullback strategy (default in the app, switch with the Strategy dropdown)
+Rules: trend (EMA21 above EMA50 and rising, mirror for shorts), price dipped to the EMA21 within the last 6 candles with RSI cooled to 45 or less, trigger candle closes beyond the previous candle's extreme with RSI turning; stop just beyond the pullback extreme (0.8-3 ATR), target 2x the stop distance, exit after 40 candles.
+Tested with research3.mjs on 50 futures coins (16 days of 5m, 47 days of 15m, 187 days of 1h), settings picked on older data and graded on newer: default settings gave profit factor 0.95 (5m), 0.91 (15m), 0.89 (1h) on the newer data. Of 138-144 setting combinations per timeframe, only 21-31% were profitable on newer data and the median was 0.91-0.95. The best-looking combinations on older data fell apart on newer data (1h: 1.13 then 0.42). Shorts worked better than longs in the recent sell-off. Conclusion: no proven edge; use it to learn and paper-trade, not as a money machine.
+
 ## Your routine (per trade)
 1. Pick 5m (or 1m) and watch the Scanner. Wait for LONG/SHORT in the Signal column.
 2. Click that coin. Check: green "Fee gate passed", Signal age 0 or 1 candle, backtest panel not deep red.

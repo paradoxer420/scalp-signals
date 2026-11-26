@@ -25,9 +25,10 @@ th:first-child,td:first-child{text-align:left}tr.sc{cursor:pointer}tr.sc:hover{b
 </style></head><body>
 <header><b>SCALP SIGNALS</b>
 <label>Coin <select id="sym"></select></label>
+<label>Strategy <select id="strat"><option value="pb" selected>Pullback<option value="flip">Trend-flip</select></label>
 <label>Timeframe <select id="tf"><option>1m<option selected>5m<option>15m<option>1h<option>4h</select></label>
 <label>Fee %/side <input id="fee" type="number" step="0.01" value="0.05"></label>
-<label>Reward:Risk <input id="rr" type="number" step="0.1" value="1.5"></label>
+<label>Reward:Risk <input id="rr" type="number" step="0.1" value="2"></label>
 <label>Account $ <input id="acc" type="number" value="1000"></label>
 <label>Risk % <input id="risk" type="number" step="0.1" value="1"></label>
 <label><input id="short" type="checkbox" checked> shorts (futures)</label>
@@ -80,22 +81,33 @@ function analyze(C,qtf){const c=C.map(k=>k.c),e9=ema(c,9),e21=ema(c,21),rs=rsi(c
  const q=qtf!==undefined?qtf:typeof QF==='function'&&QF(),ax=adx(C),st=supertrend(C),e200=ema(c,200),pos=C.map(k=>(k.c-k.l)/((k.h-k.l)||1)),
   strong=(i,d)=>d>0?pos[i]>.6:pos[i]<.4,
   qok=(i,d)=>!q||(q==='5m'?ax[i]>25&&strong(i,d):q==='15m'?ax[i]>20&&st[i]===d:q==='1h'?d*(c[i]-e200[i])>0&&strong(i,d):true);
- const L=[],S=[],sig=[];
- C.forEach((k,i)=>{L[i]=[e9[i]>e21[i],k.c>vw[i],rs[i]>50&&rs[i]<70];S[i]=[e9[i]<e21[i],k.c<vw[i],rs[i]<50&&rs[i]>30];
+ const pb=typeof PB==='function'&&PB(),e50=ema(c,50),L=[],S=[],sig=[],ext=[];
+ if(pb){ // PULLBACK: trend (EMA21 vs EMA50 rising) + dip to the EMA within 6 bars with RSI cooled + trigger candle; stop beyond the pullback extreme
+  const ref=pb.depth===50?e50:e21;
+  C.forEach((k,i)=>{sig[i]=0;L[i]=[false,false,false];S[i]=[false,false,false];if(i<210||!(at[i]>0))return;
+   for(const d of[1,-1]){const tr=d>0?e21[i]>e50[i]&&e50[i]>e50[i-10]:e21[i]<e50[i]&&e50[i]<e50[i-10];
+    let touched=false,rsX=d>0?100:0,ex=d>0?Infinity:-Infinity;
+    for(let j=i-6;j<i;j++){const b=C[j];if(d>0){if(b.l<=ref[j]+0.25*at[j])touched=true;rsX=Math.min(rsX,rs[j]);ex=Math.min(ex,b.l)}else{if(b.h>=ref[j]-0.25*at[j])touched=true;rsX=Math.max(rsX,rs[j]);ex=Math.max(ex,b.h)}}
+    const pk=C[i-1],tg=d>0?k.c>pk.h&&k.c>ref[i]&&rs[i]>rs[i-1]:k.c<pk.l&&k.c<ref[i]&&rs[i]<rs[i-1],ok3=[tr&&(!pb.adx||ax[i]>pb.adx),touched&&(d>0?rsX<=pb.rsi:rsX>=100-pb.rsi),tg];
+    (d>0?L:S)[i]=ok3;if(ok3.every(Boolean)){sig[i]=d;ext[i]=ex;break}}})
+ }else C.forEach((k,i)=>{L[i]=[e9[i]>e21[i],k.c>vw[i],rs[i]>50&&rs[i]<70];S[i]=[e9[i]<e21[i],k.c<vw[i],rs[i]<50&&rs[i]>30];
   const lo=i>50&&L[i].every(Boolean)&&!L[i-1].every(Boolean),so=i>50&&S[i].every(Boolean)&&!S[i-1].every(Boolean);
   const d=lo?1:so?-1:0;sig[i]=d&&qok(i,d)?d:0});
- return{c,e9,e21,rs,vw,at,L,S,sig,ax,st}}
+ return{c,e9,e21,e50,rs,vw,at,L,S,sig,ax,st,ext,ok:(i,d)=>pb?sig[i]===d||sig[i-1]===d:(d>0?L:S)[i].every(Boolean)}}
 const QF=()=>$('q').checked?$('tf').value:0;
-const P=()=>({fee:+$('fee').value/100,rr:+$('rr').value,shorts:$('short').checked});
+const PB=()=>$('strat').value==='pb'?{depth:21,rsi:45,adx:0}:0;
+const P=()=>({fee:+$('fee').value/100,rr:+$('rr').value,shorts:$('short').checked,pb:$('strat').value==='pb'});
 // fee gate: target move must be >= 2x the round-trip fee or the trade is not worth taking
-const plan=(entry,a,dir,p)=>{const sl=entry-dir*ATRSL*a,tp=entry+dir*ATRSL*p.rr*a;return{entry,sl,tp,ok:Math.abs(tp-entry)/entry>=4*p.fee}};
+// pullback mode puts the stop just beyond the pullback extreme (0.8-3 ATR); flip mode uses a fixed 1.5 ATR
+const plan=(entry,a,dir,p,ext)=>{let r=ATRSL*a;if(p.pb&&ext!=null)r=Math.min(3*a,Math.max(0.8*a,Math.abs(entry-(ext-dir*0.2*a))));
+ const sl=entry-dir*r,tp=entry+dir*p.rr*r;return{entry,sl,tp,ok:Math.abs(tp-entry)/entry>=4*p.fee}};
 
 function backtest(C,A,p){const T=[];
  for(let i=51;i<C.length-1;i++){const d=A.sig[i];if(!d||(d<0&&!p.shorts))continue;
-  const pl=plan(C[i+1].o,A.at[i],d,p);if(!pl.ok)continue;let ex=null,j=i+1;
-  for(;j<=Math.min(i+MAXBARS,C.length-1);j++){const k=C[j],hs=d>0?k.l<=pl.sl:k.h>=pl.sl,ht=d>0?k.h>=pl.tp:k.l<=pl.tp;
+  const pl=plan(C[i+1].o,A.at[i],d,p,A.ext&&A.ext[i]);if(!pl.ok)continue;let ex=null,j=i+1;const MB=p.pb?40:MAXBARS;
+  for(;j<=Math.min(i+MB,C.length-1);j++){const k=C[j],hs=d>0?k.l<=pl.sl:k.h>=pl.sl,ht=d>0?k.h>=pl.tp:k.l<=pl.tp;
    if(hs){ex=pl.sl;break}if(ht){ex=pl.tp;break}}
-  if(ex===null){j=Math.min(i+MAXBARS,C.length-1);ex=C[j].c}
+  if(ex===null){j=Math.min(i+MB,C.length-1);ex=C[j].c}
   T.push({t:C[i].t,d,pnl:d*(ex-pl.entry)/pl.entry*100-2*p.fee*100});i=j}
  return T}
 function stats(T){if(!T.length)return'No trades in this window (fee gate or quiet market).';
@@ -129,23 +141,25 @@ const fmt=v=>v>=100?v.toFixed(2):v>=1?v.toFixed(4):v.toFixed(6);
 function render(){const sym=$('sym').value||SYMS[0],tf=$('tf').value,p=P(),raw=cache[sym+tf];if(!raw)return;
  const C=raw.slice(0,-1),A=analyze(C);
  cs.setData(raw.map(k=>({time:k.t,open:k.o,high:k.h,low:k.l,close:k.c})));
- const ln=a=>C.map((k,i)=>({time:k.t,value:a[i]})).slice(21);l9.setData(ln(A.e9));l21.setData(ln(A.e21));lv.setData(ln(A.vw));
- const mk=[];C.forEach((k,i)=>{const d=A.sig[i];if(d&&(d>0||p.shorts)&&plan(C[Math.min(i+1,C.length-1)].o,A.at[i],d,p).ok)
+ const ln=a=>C.map((k,i)=>({time:k.t,value:a[i]})).slice(p.pb?60:21);l9.setData(ln(p.pb?A.e50:A.e9));l21.setData(ln(A.e21));lv.setData(ln(A.vw));
+ const mk=[];C.forEach((k,i)=>{const d=A.sig[i];if(d&&(d>0||p.shorts)&&plan(C[Math.min(i+1,C.length-1)].o,A.at[i],d,p,A.ext[i]).ok)
   mk.push({time:k.t,position:d>0?'belowBar':'aboveBar',color:d>0?'#26a69a':'#ef5350',shape:d>0?'arrowUp':'arrowDown',text:d>0?'LONG':'SHORT'})});
  cs.setMarkers(mk);
  // now panel
  const i=C.length-1,px=raw[raw.length-1].c,a=A.at[i],ck=(ok,txt)=>`<div class="${ok?'ok':'no'}">${ok?'✔':'✘'} ${txt}</div>`;
- const lo=A.L[i].every(Boolean),so=A.S[i].every(Boolean)&&p.shorts;
+ const lo=A.ok(i,1),so=A.ok(i,-1)&&p.shorts,pbc=PB();
  let last=-1;for(let j=i;j>i-6&&j>51;j--)if(A.sig[j]&&(A.sig[j]>0||p.shorts)){last=j;break}
  const age=last<0?null:i-last,dir=last<0?0:A.sig[last],state=(lo||so)&&age!==null&&age<=1?dir:0;
  let h=`<div class="big ${state>0?'long':state<0?'short':'wait'}">${state>0?'LONG':state<0?'SHORT':'WAIT'}</div>`;
- h+=`<div class="mut">Long checklist</div>`+ck(A.L[i][0],`EMA9 &gt; EMA21 (trend)`)+ck(A.L[i][1],`Price &gt; VWAP`)+ck(A.L[i][2],`RSI ${A.rs[i].toFixed(0)} in 50–70`);
- h+=`<div class="mut" style="margin-top:4px">Short checklist</div>`+ck(A.S[i][0],`EMA9 &lt; EMA21`)+ck(A.S[i][1],`Price &lt; VWAP`)+ck(A.S[i][2],`RSI ${A.rs[i].toFixed(0)} in 30–50`);
- if(state){const pl=plan(px,a,state,p),rd=Math.abs(pl.entry-pl.sl),qty=$('acc').value*$('risk').value/100/rd;
+ h+=`<div class="mut">Long checklist${pbc?' (pullback)':''}</div>`+(pbc?ck(A.L[i][0],`Uptrend: EMA21 &gt; EMA50 and rising`)+ck(A.L[i][1],`Dipped to EMA21 in last 6 candles, RSI cooled to ${pbc.rsi} or less`)+ck(A.L[i][2],`Trigger: closed above prior high, RSI ${A.rs[i].toFixed(0)} turning up`)
+  :ck(A.L[i][0],`EMA9 &gt; EMA21 (trend)`)+ck(A.L[i][1],`Price &gt; VWAP`)+ck(A.L[i][2],`RSI ${A.rs[i].toFixed(0)} in 50–70`));
+ h+=`<div class="mut" style="margin-top:4px">Short checklist${pbc?' (pullback)':''}</div>`+(pbc?ck(A.S[i][0],`Downtrend: EMA21 &lt; EMA50 and falling`)+ck(A.S[i][1],`Rallied to EMA21 in last 6 candles, RSI warmed to ${100-pbc.rsi} or more`)+ck(A.S[i][2],`Trigger: closed below prior low, RSI ${A.rs[i].toFixed(0)} turning down`)
+  :ck(A.S[i][0],`EMA9 &lt; EMA21`)+ck(A.S[i][1],`Price &lt; VWAP`)+ck(A.S[i][2],`RSI ${A.rs[i].toFixed(0)} in 30–50`));
+ if(state){const pl=plan(px,a,state,p,A.ext[last]),rd=Math.abs(pl.entry-pl.sl),qty=$('acc').value*$('risk').value/100/rd;
   h+=`<hr style="border-color:var(--b)"><table><tr><td>Entry (≈now)</td><td>${fmt(pl.entry)}</td></tr><tr><td>Stop loss</td><td class="no">${fmt(pl.sl)}</td></tr>
   <tr><td>Take profit</td><td class="ok">${fmt(pl.tp)}</td></tr><tr><td>Size (risk $${($('acc').value*$('risk').value/100).toFixed(2)})</td><td>${qty.toPrecision(4)} (${(qty*px).toFixed(0)} USDT)</td></tr></table>
   <div class="${pl.ok?'ok':'no'}">${pl.ok?'Fee gate passed — worth trading':'Fee gate FAILED — target too small vs fees, skip'}</div>
-  <div class="mut">Signal age: ${age} candle(s). Don’t chase if price already moved toward TP. Exit after ${MAXBARS} candles if neither hit.</div>`}
+  <div class="mut">Signal age: ${age} candle(s). Don’t chase if price already moved toward TP. Exit after ${p.pb?40:MAXBARS} candles if neither hit.</div>`}
  h+=`<div class="mut" style="margin-top:6px">Swing bias (4h / 1d trend)</div>`+['4h','1d'].map(t=>{const b=hbias(sym,t);return`<div class="${b>0?'ok':b<0?'no':'mut'}">${b>0?'▲ bullish':b<0?'▼ bearish':'– neutral / loading'} ${t}</div>`}).join('');
  if(state){const al=hbias(sym,'4h')===state&&hbias(sym,'1d')===state;h+=`<div class="${al?'ok':'no'}"><b>${al?'✔✔ Swing-aligned: higher timeframes agree, higher-conviction trade':'✘ Not swing-aligned: trading against or without the bigger trend, smaller size or skip'}</b></div>`}
  $('now').innerHTML=h;
@@ -154,7 +168,7 @@ function render(){const sym=$('sym').value||SYMS[0],tf=$('tf').value,p=P(),raw=c
  let rows='<tr class="mut"><th>Coin<th>Price<th>RSI<th>Long<th>Short<th>4h<th>1d<th>Signal</tr>';
  const rk=s=>{const R=cache[s+tf];if(!R)return 0;const c2=R.slice(0,-1),B=analyze(c2),n=c2.length-1,g=B.sig[n];return g&&(g>0||p.shorts)?9:Math.max(B.L[n].filter(Boolean).length,p.shorts?B.S[n].filter(Boolean).length:0)};
  [...SYMS].sort((a,b)=>rk(b)-rk(a)).forEach(s=>{const R=cache[s+tf];if(!R)return;const c2=R.slice(0,-1),B=analyze(c2),n=c2.length-1,
-  ls=B.L[n].filter(Boolean).length,ss=B.S[n].filter(Boolean).length,sg=B.sig[n],ok=sg&&(sg>0||p.shorts)&&plan(R[R.length-1].o,B.at[n],sg,p).ok;
+  ls=B.L[n].filter(Boolean).length,ss=B.S[n].filter(Boolean).length,sg=B.sig[n],ok=sg&&(sg>0||p.shorts)&&plan(R[R.length-1].o,B.at[n],sg,p,B.ext[n]).ok;
   rows+=`<tr class="sc" onclick="$('sym').value='${s}';render()"><td>${s.replace('USDT','')}<td>${fmt(R[R.length-1].c)}<td>${B.rs[n].toFixed(0)}<td>${ls}/3<td>${ss}/3<td>${hb(hbias(s,'4h'))}<td>${hb(hbias(s,'1d'))}<td class="${ok?(sg>0?'ok':'no'):'mut'}">${ok?(sg>0?'LONG':'SHORT')+(hbias(s,'4h')===sg&&hbias(s,'1d')===sg?' ✔✔':''):'—'}</tr>`;
   });
  $('scan').innerHTML=rows;
@@ -168,8 +182,8 @@ async function loadOthers(){const tf=$('tf').value;await Promise.all(SYMS.flatMa
 function renderEnter(){const p=P(),qq=$('q').checked,rows=[];let weak=0,have=0;
  TFS.forEach(tf=>SYMS.forEach(s=>{const R=cache[s+tf];if(!R||R.length<250)return;have++;const C=R.slice(0,-1),A=analyze(C,qq?tf:0),n=C.length-1;
   let g=0,age=9;for(let j=n;j>=n-1;j--)if(A.sig[j]){g=A.sig[j];age=n-j;break}
-  if(!g||(g<0&&!p.shorts)||!(g>0?A.L[n]:A.S[n]).every(Boolean))return;
-  const px=R[R.length-1].c,pl=plan(px,A.at[n],g,p);if(!pl.ok)return;
+  if(!g||(g<0&&!p.shorts)||!A.ok(n,g))return;
+  const px=R[R.length-1].c,pl=plan(px,A.at[n],g,p,A.ext[n-age]);if(!pl.ok)return;
   const T=backtest(C,A,p),w=T.filter(x=>x.pnl>0),gp=w.reduce((a,x)=>a+x.pnl,0),gl=-T.filter(x=>x.pnl<=0).reduce((a,x)=>a+x.pnl,0),pf=gl?gp/gl:99,net=T.reduce((a,x)=>a+x.pnl,0),slp=Math.abs(px-pl.sl)/px*100;
   if(T.length<10||pf<1.3||net<=0||slp>4){weak++;return}
   rows.push({s,tf,g,age,px,pl,pf,net,n:T.length,slp,t:C[n].t,al:hbias(s,'4h')===g&&hbias(s,'1d')===g})}));
@@ -180,7 +194,7 @@ function renderEnter(){const p=P(),qq=$('q').checked,rows=[];let weak=0,have=0;
   <div><b class="${r.g>0?'ok':'no'}">${r.g>0?'LONG':'SHORT'}</b> <b>${r.s.replace('USDT','')}</b> ${r.tf} <span class="mut">· ${r.age?'1 candle old':'fresh'} · PF ${r.pf.toFixed(2)} (${r.net.toFixed(1)}%, ${r.n} trades)</span> ${r.al?'<b class="ok">✔✔ swing-aligned</b>':'<span class="mut">swing not aligned: smaller size</span>'}</div>
   <div class="mut">in ${fmt(r.px)} · <span class="no">SL ${fmt(r.pl.sl)}</span> (${r.slp.toFixed(1)}%) · <span class="ok">TP ${fmt(r.pl.tp)}</span> · size ≈ $${(risk/(r.slp/100)).toFixed(0)}</div></div>`).join('')
   +(rows.length?'':have?'<div>Nothing meets all the rules right now. Waiting is a valid position.</div>':'')
-  +`<div class="mut" style="margin-top:4px">${weak} weaker signals hidden (history too thin/negative, or stop over 4%). Tap a row to open its chart.</div><div class="mut" style="margin-top:4px"><b>Caveat:</b> each coin's history is only ~15-30 trades, which is mostly noise. Tests across all 50 coins over weeks found no proven edge outside strong trends. Small size, stop on the exchange, always.</div>`}
+  +`<div class="mut" style="margin-top:4px">${weak} weaker signals hidden (history too thin/negative, or stop over 4%). Tap a row to open its chart.</div><div class="mut" style="margin-top:4px"><b>Caveat:</b> ${p.pb?'Pullback was tested on 50 coins (up to 6 months): on newer data its profit factor was 0.89-0.95, a small loss after fees, and only 21-31% of 138 setting combos were profitable. Shorts did best in the sell-off, longs lost. Treat it as unproven.':'Tests across 50 coins over weeks found no proven edge outside strong trends.'} Each coin's own history is only ~15-30 trades, mostly noise. Paper-trade first, small size, stop on the exchange, always.</div>`}
 function ping(s,d,tf){const t=`${d>0?'LONG':'SHORT'} entry ${s.replace('USDT','')} (${tf})`;
  try{const o=actx.createOscillator();o.connect(actx.destination);o.frequency.value=d>0?880:440;o.start();o.stop(actx.currentTime+.4)}catch{}
  try{navigator.vibrate&&navigator.vibrate([200,100,200])}catch{}
@@ -190,6 +204,6 @@ $('alert').onclick=async()=>{actx=new AudioContext();window.armed=true;try{Notif
  $('alert').textContent='Alerts ON (keep app open)'};
 document.addEventListener('visibilitychange',async()=>{if(window.armed&&document.visibilityState==='visible')try{window.wl=await navigator.wakeLock.request('screen')}catch{}});
 if('serviceWorker' in navigator&&location.protocol!=='file:')navigator.serviceWorker.register('sw.js').catch(()=>{});
-['sym','tf','fee','rr','acc','risk','short','q'].forEach(id=>$(id).onchange=()=>id==='tf'?refresh():render());
+['sym','tf','fee','rr','acc','risk','short','q','strat'].forEach(id=>$(id).onchange=()=>{if(id==='strat')$('rr').value=$('strat').value==='pb'?2:1.5;id==='tf'?refresh():render()});
 top50().then(()=>{refresh();setInterval(refresh,15000)});
 </script></body></html>
