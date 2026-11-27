@@ -62,3 +62,8 @@ Fixed in advance, 50 coins, older 60% vs newer 40%, 0.05% fee per side, profit f
 - **Confluence (several of the six strategies agree within 3 candles).** 5m: any 0.82/0.98, 2+ 0.81/0.94, 3+ 0.89/0.82. 15m: any 0.87/0.91, 2+ 0.90/0.93, 3+ 0.96/0.95 (a small steady improvement, still under 1). 1h: any 0.89/1.02, 2+ 0.85/1.01, 3+ 0.88/0.98. No reliable gain.
 - **Trade management** (breakeven after +1R, breakeven plus a 3R target, trailing stop): every version was below 1 on the older data on all timeframes (0.71-0.93). On 1h the newer data showed 1.05-1.08, the older did not, so it looks like market regime, not a fix.
 - **What the app does with it:** when strategies agree on a coin the room shows ONE row tagged "N agree". The paper log records every strategy's own signal AND a separate "2+ agree" entry, so the live forward test settles whether agreement matters.
+
+## If the app feels stuck (fixes in the latest update)
+- The scanner used to re-analyze every coin inside its sort, hundreds of times per refresh; it now analyzes each coin once (refresh 71 ms down to 25 ms on a PC) and the signal room is computed in small slices (longest freeze 17 ms from cold).
+- Refreshes no longer pile up on a slow connection, one hung request can no longer stall a refresh (12 s timeout), polling is every 30 s (signals use closed candles), and problems show in the status line ("data error ... rate-limited", "error: ...") instead of failing silently.
+- The offline helper now falls back to its saved copy after 4 s and always checks for a fresh page. Close and reopen the app while online to pick all of this up.

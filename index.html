@@ -147,7 +147,7 @@ function stats(T){if(!T.length)return'No trades in this window (fee gate or quie
  <div class="mut">Positive Net AND profit factor &gt; 1.3 on several coins/timeframes = worth paper-trading. Otherwise skip that pair.</div>`}
 
 // ---------- data ----------
-async function load(sym,tf){const r=await fetch(`${API}?symbol=${sym}&interval=${tf}&limit=500`);if(!r.ok)throw new Error(r.status);
+async function load(sym,tf){const r=await fetch(`${API}?symbol=${sym}&interval=${tf}&limit=500`,typeof AbortSignal!=='undefined'&&AbortSignal.timeout?{signal:AbortSignal.timeout(12000)}:{});if(!r.ok)throw new Error(r.status); // 12 s timeout so one hung request cannot stall a refresh
  return(await r.json()).map(k=>({t:k[0]/1000,o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]}))}
 // ---------- market-regime filter (experimental, pullback mode only; research4.mjs variant D) ----------
 // Only take pullbacks WITH the market: breadth of the top 50 (bullish minus bearish coins on 1h) at least 50% in the trade's direction,
@@ -178,9 +178,13 @@ function hbias(s,t){const C=hc[s+t];if(!C||C.length<60)return;const c=C.slice(0,
  return c[i]>e50[i]&&e20[i]>e50[i]&&r[i]>50?1:c[i]<e50[i]&&e20[i]<e50[i]&&r[i]<50?-1:0}
 async function loadHTF(){await Promise.all(SYMS.flatMap(s=>['4h','1d'].map(async t=>{try{hc[s+t]=await load(s,t)}catch{}})))}
 const hb=b=>b>0?'<span class="ok">▲</span>':b<0?'<span class="no">▼</span>':'<span class="mut">–</span>';
-async function refresh(){const tf=$('tf').value;if(Date.now()-hts>300000){hts=Date.now();loadHTF().then(render)}if(Date.now()-ats>60000){ats=Date.now();loadOthers().then(render)}try{
- await Promise.all(SYMS.map(async s=>cache[s+tf]=await load(s,tf)));$('st').textContent='updated '+new Date().toLocaleTimeString();}
- catch(e){$('st').textContent='data error: '+e.message}render()}
+// refresh: one at a time (a slow network must not pile up requests), failures per coin are tolerated, errors are shown in the status line
+let busy=0;
+async function refresh(){if(busy&&Date.now()-busy<40000)return;busy=Date.now();const tf=$('tf').value;
+ if(Date.now()-hts>300000){hts=Date.now();loadHTF().then(render)}if(Date.now()-ats>120000){ats=Date.now();loadOthers().then(render)}
+ const res=await Promise.allSettled(SYMS.map(async s=>{cache[s+tf]=await load(s,tf)})),bad=res.filter(r=>r.status==='rejected');
+ $('st').textContent=bad.length&&bad.length===res.length?`data error (${(bad[0].reason&&bad[0].reason.message)||'no connection'}): Binance unreachable or rate-limited, retrying`:'updated '+new Date().toLocaleTimeString()+(bad.length?` (${bad.length} coins failed)`:'');
+ busy=0;try{render()}catch(e){$('st').textContent='display error: '+e.message}}
 
 // ---------- chart ----------
 const chart=LightweightCharts.createChart($('chart'),{layout:{background:{color:'#161b22'},textColor:'#d7dde5'},grid:{vertLines:{color:'#222a35'},horzLines:{color:'#222a35'}},timeScale:{timeVisible:true},autoSize:true});
@@ -216,19 +220,21 @@ function render(){const sym=$('sym').value||SYMS[0],tf=$('tf').value,p=P(),raw=c
  $('bt').innerHTML=stats(backtest(C,A,p));
  // scanner
  // win-rate filter ("Min win %"): only coins whose backtest with the current strategy won at least that share of 10+ trades
- const mw=+$('minwin').value||0,wrm={};SYMS.forEach(s=>{const R=cache[s+tf];if(!R)return;const c2=R.slice(0,-1),T=backtest(c2,analyze(c2),p);wrm[s]={n:T.length,wr:T.length?T.filter(x=>x.pnl>0).length/T.length*100:0}});
+ const mw=+$('minwin').value||0,wrm={},AN={},getA=s=>AN[s]||(AN[s]=analyze(cache[s+tf].slice(0,-1))); // one analysis per coin per render
+ SYMS.forEach(s=>{const R=cache[s+tf];if(!R)return;const c2=R.slice(0,-1),T=backtest(c2,getA(s),p);wrm[s]={n:T.length,T,wr:T.length?T.filter(x=>x.pnl>0).length/T.length*100:0}});
  const pass=s=>!mw||(wrm[s]&&wrm[s].n>=10&&wrm[s].wr>=mw),bestW=Object.entries(wrm).filter(([,v])=>v.n>=10).sort((a,b)=>b[1].wr-a[1].wr)[0];
  const none=mw&&!SYMS.some(pass)?`<div class="mut" style="margin:4px 0">No coin has a win rate of ${mw}%+ over 10+ trades on ${tf}.${bestW?` Highest: ${bestW[0].replace('USDT','')} at ${bestW[1].wr.toFixed(0)}% (${bestW[1].n} trades).`:''}</div>`:'';
  let rows='<tr class="mut"><th>Coin<th>Price<th>RSI<th>Long<th>Short<th>4h<th>1d<th>Signal</tr>';
- const rk=s=>{const R=cache[s+tf];if(!R)return 0;const c2=R.slice(0,-1),B=analyze(c2),n=c2.length-1,g=B.sig[n];return g&&(g>0||p.shorts)?9:Math.max(B.L[n].filter(Boolean).length,p.shorts?B.S[n].filter(Boolean).length:0)};
- [...SYMS].sort((a,b)=>rk(b)-rk(a)).forEach(s=>{const R=cache[s+tf];if(!R||!pass(s))return;const c2=R.slice(0,-1),B=analyze(c2),n=c2.length-1,
+ const rk=s=>{const R=cache[s+tf];if(!R)return 0;const B=getA(s),n=R.length-2,g=B.sig[n];return g&&(g>0||p.shorts)?9:Math.max(B.L[n].filter(Boolean).length,p.shorts?B.S[n].filter(Boolean).length:0)},rkv={};
+ SYMS.forEach(s=>rkv[s]=rk(s)); // rank each coin once (it used to re-analyze inside the sort comparison)
+ [...SYMS].sort((a,b)=>rkv[b]-rkv[a]).forEach(s=>{const R=cache[s+tf];if(!R||!pass(s))return;const c2=R.slice(0,-1),B=getA(s),n=c2.length-1,
   ls=B.L[n].filter(Boolean).length,ss=B.S[n].filter(Boolean).length,sg=B.sig[n],ok=sg&&(sg>0||p.shorts)&&plan(R[R.length-1].o,B.at[n],sg,p,B.ext[n]).ok;
   rows+=`<tr class="sc" onclick="$('sym').value='${s}';render()"><td>${s.replace('USDT','')}<td>${fmt(R[R.length-1].c)}<td>${B.rs[n].toFixed(0)}<td>${ls}/3<td>${ss}/3<td>${hb(hbias(s,'4h'))}<td>${hb(hbias(s,'1d'))}<td class="${ok?(sg>0?'ok':'no'):'mut'}">${ok?(sg>0?'LONG':'SHORT')+(hbias(s,'4h')===sg&&hbias(s,'1d')===sg?' ✔✔':''):'—'}</tr>`;
   });
  $('scan').innerHTML=rows+(none?`<tr><td colspan=8>${none}</td></tr>`:'');
- const rk2=SYMS.filter(s=>cache[s+tf]&&pass(s)).map(s=>{const c2=cache[s+tf].slice(0,-1),B=analyze(c2),T=backtest(c2,B,p),net=T.reduce((a,x)=>a+x.pnl,0),n=c2.length-1,g=B.sig[n];
+ const rk2=SYMS.filter(s=>cache[s+tf]&&pass(s)).map(s=>{const c2=cache[s+tf].slice(0,-1),B=getA(s),T=wrm[s].T,net=T.reduce((a,x)=>a+x.pnl,0),n=c2.length-1,g=B.sig[n];
   return{s,net,n:T.length,now:g&&(g>0||p.shorts)}}).sort((a,b)=>b.net-a.net),mx=Math.max(1,...rk2.map(x=>Math.abs(x.net)));
- $('rank').innerHTML=none+rk2.map(x=>`<div onclick="$('sym').value='${x.s}';render()" style="cursor:pointer;display:flex;align-items:center;gap:6px;margin:2px 0${x.s===sym?';outline:1px solid var(--y)':''}"><span style="width:52px">${x.now?'▶ ':''}${x.s.replace('USDT','')}</span><div style="flex:1;height:10px;background:#ffffff0a"><div style="width:${Math.abs(x.net)/mx*100}%;height:100%;background:${x.n<5?'#667':x.net>=0?'var(--g)':'var(--r)'};margin-left:${x.net>=0?0:'auto'}"></div></div><span style="width:70px;text-align:right" class="mut">${x.net.toFixed(1)}% (${x.n})</span></div>`).join('');renderEnter()}
+ $('rank').innerHTML=none+rk2.map(x=>`<div onclick="$('sym').value='${x.s}';render()" style="cursor:pointer;display:flex;align-items:center;gap:6px;margin:2px 0${x.s===sym?';outline:1px solid var(--y)':''}"><span style="width:52px">${x.now?'▶ ':''}${x.s.replace('USDT','')}</span><div style="flex:1;height:10px;background:#ffffff0a"><div style="width:${Math.abs(x.net)/mx*100}%;height:100%;background:${x.n<5?'#667':x.net>=0?'var(--g)':'var(--r)'};margin-left:${x.net>=0?0:'auto'}"></div></div><span style="width:70px;text-align:right" class="mut">${x.net.toFixed(1)}% (${x.n})</span></div>`).join('');warmRoom()}
 // "Can enter now": fresh (<=1 candle) signals on 5m/15m/1h, all 3 checks still true, fee gate ok,
 // and the coin's own backtest strong (>=10 trades, net>0, profit factor>=1.3) with a stop <=4%
 const TFS=['5m','15m','1h'];let ats=0,enterSeen=null;
@@ -244,6 +250,11 @@ function roomStat(s,tf,name,R,p,qq){const key=[s,tf,name,qq,RGF(),p.fee,p.shorts
  m={g:0};if(g&&(g>0||p.shorts)&&A.ok(n,g)){const T=backtest(C,A,{...p,auto:true}),w=T.filter(x=>x.pnl>0),gp=w.reduce((a,x)=>a+x.pnl,0),gl=-T.filter(x=>x.pnl<=0).reduce((a,x)=>a+x.pnl,0);
   m={g,age,a:A.at[n],ext:A.ext[n-age],t:C[n].t,n:T.length,wr:T.length?w.length/T.length*100:0,pf:gl?gp/gl:99,net:T.reduce((a,x)=>a+x.pnl,0)}}
  memo.set(key,m);if(memo.size>2500)memo.delete(memo.keys().next().value);return m}
+// warm the room's cache in small slices so a slow phone never freezes for seconds, then draw the room (cache hits are instant)
+let warming=false;
+async function warmRoom(){if(warming)return;warming=true;try{const p={...P(),auto:true},qq=$('q').checked;let k=0;
+ for(const tf of TFS){const names=STRATS(tf);for(const s of SYMS){const R=cache[s+tf];if(!R||R.length<250)continue;for(const name of names){roomStat(s,tf,name,R,p,qq);if(++k%10===0)await new Promise(r=>setTimeout(r,0))}}}}
+ catch(e){$('st').textContent='room error: '+e.message}finally{warming=false}renderEnter()}
 function renderEnter(){const p={...P(),auto:true},qq=$('q').checked,mw=+$('minwin').value||0,raw=[],near=[];let weak=0,have=0;
  TFS.forEach(tf=>{const names=STRATS(tf);SYMS.forEach(s=>{const R=cache[s+tf];if(!R||R.length<250)return;have++;names.forEach(name=>{const m=roomStat(s,tf,name,R,p,qq);if(!m.g)return;
   const g=m.g,px=R[R.length-1].c,pl=plan(px,m.a,g,p,m.ext);if(!pl.ok)return;const slp=Math.abs(px-pl.sl)/px*100;
@@ -294,6 +305,7 @@ $('clearpaper').onclick=()=>{if(confirm('Delete the whole paper trading log on t
 try{const s=JSON.parse(localStorage.getItem('scalp')||'{}');SAVE.forEach(id=>{if(id in s){const e=$(id);e.type==='checkbox'?e.checked=s[id]:e.value=s[id]}})}catch{}
 const save=()=>{try{const s={};SAVE.forEach(id=>{const e=$(id);s[id]=e.type==='checkbox'?e.checked:e.value});localStorage.setItem('scalp',JSON.stringify(s))}catch{}};
 ['sym','tf','fee','rr','acc','risk','short','q','strat','rg','topn','watch','minwin','room'].forEach(id=>$(id).onchange=()=>{if(id==='strat'&&$('strat').value!=='auto')$('rr').value=$('strat').value==='pb'?2:1.5;save();
- if(id==='topn'||id==='watch'){const keep=$('sym').value;top50().then(()=>{if(SYMS.includes(keep))$('sym').value=keep;ats=0;hts=0;enterSeen=null;refresh()})}else id==='tf'?refresh():render()});
-top50().then(()=>{refresh();setInterval(refresh,15000)});
+ if(id==='topn'||id==='watch'){const keep=$('sym').value;top50().then(()=>{if(SYMS.includes(keep))$('sym').value=keep;ats=0;hts=0;enterSeen=null;busy=0;refresh()})}else id==='tf'?(busy=0,refresh()):render()});
+addEventListener('error',e=>{$('st').textContent='error: '+(e.message||'unknown')});addEventListener('unhandledrejection',e=>{$('st').textContent='error: '+((e.reason&&e.reason.message)||e.reason)});
+top50().then(()=>{refresh();setInterval(refresh,30000)}); // signals use closed candles, so 30 s polling is plenty and halves the load on Binance and your phone
 </script></body></html>
