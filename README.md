@@ -67,3 +67,10 @@ Fixed in advance, 50 coins, older 60% vs newer 40%, 0.05% fee per side, profit f
 - The scanner used to re-analyze every coin inside its sort, hundreds of times per refresh; it now analyzes each coin once (refresh 71 ms down to 25 ms on a PC) and the signal room is computed in small slices (longest freeze 17 ms from cold).
 - Refreshes no longer pile up on a slow connection, one hung request can no longer stall a refresh (12 s timeout), polling is every 30 s (signals use closed candles), and problems show in the status line ("data error ... rate-limited", "error: ...") instead of failing silently.
 - The offline helper now falls back to its saved copy after 4 s and always checks for a fresh page. Close and reopen the app while online to pick all of this up.
+
+## The unorthodox one: panic fade ("ovx"), and the two that did not make it (research10-output.txt)
+Three unconventional ideas were tested with fixed definitions, 50 coins, older 60% vs newer 40%, fee 0.05% per side, profit factor older / newer:
+- **Overextension / panic fade (added):** price 3+ ATR from the EMA21 with RSI 22 or lower (or 78+), then a candle back the other way. 5m 1.23 / 0.50, 15m 1.06 / 0.60, 1h 0.90 / 0.73. It was the best on older data (the rule I set in advance), then collapsed on newer data: the usual sign of a lucky fit. It fires rarely (0.04-0.37 signals per coin per day).
+- **Liquidity sweep (stop-run reversal), not added:** 5m 0.92 / 0.85, 15m 0.77 / 0.78, 1h 0.88 / 0.93. Steady small loser.
+- **Exhaustion fade (6 same-direction candles then a reversal candle), not added:** 5m 0.82 / 0.73, 15m 0.86 / 0.70, 1h 0.87 / 0.87.
+Nothing "works like magic": none of the seven strategies made money on both halves of the data. The paper log forward-tests the panic fade like the rest.
