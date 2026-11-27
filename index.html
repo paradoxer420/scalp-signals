@@ -244,18 +244,21 @@ function roomStat(s,tf,name,R,p,qq){const key=[s,tf,name,qq,RGF(),p.fee,p.shorts
  m={g:0};if(g&&(g>0||p.shorts)&&A.ok(n,g)){const T=backtest(C,A,{...p,auto:true}),w=T.filter(x=>x.pnl>0),gp=w.reduce((a,x)=>a+x.pnl,0),gl=-T.filter(x=>x.pnl<=0).reduce((a,x)=>a+x.pnl,0);
   m={g,age,a:A.at[n],ext:A.ext[n-age],t:C[n].t,n:T.length,wr:T.length?w.length/T.length*100:0,pf:gl?gp/gl:99,net:T.reduce((a,x)=>a+x.pnl,0)}}
  memo.set(key,m);if(memo.size>2500)memo.delete(memo.keys().next().value);return m}
-function renderEnter(){const p={...P(),auto:true},qq=$('q').checked,mw=+$('minwin').value||0,rows=[],near=[];let weak=0,have=0;
+function renderEnter(){const p={...P(),auto:true},qq=$('q').checked,mw=+$('minwin').value||0,raw=[],near=[];let weak=0,have=0;
  TFS.forEach(tf=>{const names=STRATS(tf);SYMS.forEach(s=>{const R=cache[s+tf];if(!R||R.length<250)return;have++;names.forEach(name=>{const m=roomStat(s,tf,name,R,p,qq);if(!m.g)return;
   const g=m.g,px=R[R.length-1].c,pl=plan(px,m.a,g,p,m.ext);if(!pl.ok)return;const slp=Math.abs(px-pl.sl)/px*100;
   // with a min win rate set, that rule replaces the profit-factor rule; either way needs 10+ past trades and a stop of 4% or less
   if(m.n<10||slp>4||(mw?m.wr<mw:(m.pf<1.3||m.net<=0))){weak++;if(m.n>=10&&slp<=4)near.push({s,tf,g,wr:m.wr,n:m.n});return}
-  rows.push({s,tf,g,age:m.age,px,pl,pf:m.pf,net:m.net,wr:m.wr,n:m.n,slp,t:m.t,name,tested:(TESTED[tf]||{})[name]||{},al:hbias(s,'4h')===g&&hbias(s,'1d')===g})})})});
- rows.sort((a,b)=>b.al-a.al||b.pf-a.pf);
+  raw.push({s,tf,g,age:m.age,px,pl,pf:m.pf,net:m.net,wr:m.wr,n:m.n,slp,t:m.t,name,tested:(TESTED[tf]||{})[name]||{},al:hbias(s,'4h')===g&&hbias(s,'1d')===g})})})});
+ // when several strategies signal the same coin, timeframe and direction, show ONE row (best past profit factor) tagged "N agree".
+ // In the 50-coin test agreement did not reliably help (15m: profit factor 0.91 any, 0.93 for 2+, 0.95 for 3+ on newer data; no gain on 5m or 1h), so it is forward-tested in the paper log.
+ const grp=new Map();raw.forEach(r=>{const k=r.s+'|'+r.tf+'|'+r.g,e=grp.get(k);if(!e)grp.set(k,{...r,agree:[r.name]});else{const a=[...e.agree,r.name];if(r.pf>e.pf)Object.assign(e,r);e.agree=a}});
+ const rows=[...grp.values()].sort((a,b)=>b.al-a.al||b.agree.length-a.agree.length||b.pf-a.pf);
  const seen=new Set(rows.map(r=>r.s+r.tf+r.name+r.t));if(enterSeen&&window.armed)rows.forEach(r=>{if(!enterSeen.has(r.s+r.tf+r.name+r.t))ping(r.s,r.g,r.tf)});enterSeen=seen;
- trackPaper(rows);renderPaper();
+ trackPaper(raw,rows);renderPaper();
  const risk=$('acc').value*$('risk').value/100;
  $('enter').innerHTML=(have?'':'Loading timeframes…')+rows.slice(0,12).map(r=>`<div onclick="$('sym').value='${r.s}';$('tf').value='${r.tf}';refresh()" style="cursor:pointer;padding:6px 0;border-bottom:1px solid var(--b)">
-  <div><b class="${r.g>0?'ok':'no'}">${r.g>0?'LONG':'SHORT'}</b> <b>${r.s.replace('USDT','')}</b> ${r.tf} <span class="mut">·</span> <b>${SNAME[r.name]}</b> <span class="mut">· ${r.age?'1 candle old':'fresh'} · win ${r.wr.toFixed(0)}% · PF ${r.pf.toFixed(2)} (${r.net.toFixed(1)}%, ${r.n} trades)</span> <span style="color:${r.tested.isPf>=1&&r.tested.oosPf>=1?'var(--g)':r.tested.oosPf>=1?'var(--y)':'var(--r)'}" title="Profit factor of this strategy over 50 coins on the older 60% / newer 40% of the data. Above 1 = made money. Green = both, yellow = newer only, red = neither.">tested ${r.tested.isPf==null?'?':r.tested.isPf.toFixed(2)} / ${r.tested.oosPf==null?'?':r.tested.oosPf.toFixed(2)}</span> ${r.al?'<b class="ok">✔✔ swing-aligned</b>':'<span class="mut">swing not aligned: smaller size</span>'}</div>
+  <div><b class="${r.g>0?'ok':'no'}">${r.g>0?'LONG':'SHORT'}</b> <b>${r.s.replace('USDT','')}</b> ${r.tf} <span class="mut">·</span> <b>${r.agree.length>1?r.agree.length+' agree: '+r.agree.map(n=>SNAME[n]).join(' + '):SNAME[r.name]}</b> <span class="mut">· ${r.age?'1 candle old':'fresh'} · win ${r.wr.toFixed(0)}% · PF ${r.pf.toFixed(2)} (${r.net.toFixed(1)}%, ${r.n} trades)</span> <span style="color:${r.tested.isPf>=1&&r.tested.oosPf>=1?'var(--g)':r.tested.oosPf>=1?'var(--y)':'var(--r)'}" title="Profit factor of this strategy over 50 coins on the older 60% / newer 40% of the data. Above 1 = made money. Green = both, yellow = newer only, red = neither.">tested ${r.tested.isPf==null?'?':r.tested.isPf.toFixed(2)} / ${r.tested.oosPf==null?'?':r.tested.oosPf.toFixed(2)}</span> ${r.al?'<b class="ok">✔✔ swing-aligned</b>':'<span class="mut">swing not aligned: smaller size</span>'}</div>
   <div class="mut">in ${fmt(r.px)} · <span class="no">SL ${fmt(r.pl.sl)}</span> (${r.slp.toFixed(1)}%) · <span class="ok">TP ${fmt(r.pl.tp)}</span> · size ≈ $${(risk/(r.slp/100)).toFixed(0)}</div></div>`).join('')
   +(rows.length?'':have?`<div>Nothing meets all the rules right now${mw?` (win rate ${mw}%+ over 10+ past trades)`:''}. Waiting is a valid position.</div>`+(mw&&near.length?`<div class="mut">Closest fresh signals by past win rate: ${near.sort((a,b)=>b.wr-a.wr).slice(0,3).map(r=>`${r.s.replace('USDT','')} ${r.tf} ${r.wr.toFixed(0)}% (${r.n} trades)`).join(', ')}.</div>`:''):'')
   +`<div class="mut" style="margin-top:4px">${weak} weaker signals hidden (history too thin/negative, or stop over 4%). Tap a row to open its chart.</div><div class="mut" style="margin-top:4px"><b>Caveat:</b> "tested" shows each strategy's profit factor over 50 coins on older / newer data (above 1 made money, below 1 lost after fees). All six lost on the older data and only four setups made money on the newer data, so none is proven. Requiring a trending market did not help. ${mw?`Win-rate filter: in the 50-coin test no coin reached 90% (best 52-59%, typical 35-40%) and a coin's past win rate did not predict its future win rate (correlation 0.04, -0.11, 0.27).`:''} Each coin's own history is only ~15-30 trades, mostly noise. Paper-trade first, small size, stop on the exchange, always.</div>`}
@@ -263,16 +266,18 @@ function renderEnter(){const p={...P(),auto:true},qq=$('q').checked,mw=+$('minwi
 // (stop first if both hit in one candle, or closed after 30/40 candles). It builds a real forward test of each strategy.
 let paper=[];try{paper=JSON.parse(localStorage.getItem('scalp_paper')||'[]')}catch{}
 const savePaper=()=>{try{localStorage.setItem('scalp_paper',JSON.stringify(paper.slice(-400)))}catch{}};
-function trackPaper(rows){const now=Date.now()/1000,fee=P().fee;
- rows.forEach(r=>{const id=[r.s,r.tf,r.name,r.t].join('|');if(!paper.some(x=>x.id===id))paper.push({id,s:r.s,tf:r.tf,name:r.name,d:r.g,at:now,entry:r.px,sl:r.pl.sl,tp:r.pl.tp,st:'open'})});
+const PLAB={...SNAME,agree:'2+ agree'};
+// every strategy's own signal is logged (so none is picked by its backtest), plus one "2+ agree" entry when several agree
+function trackPaper(raw,merged){const now=Date.now()/1000,fee=P().fee,add=(r,name)=>{const id=[r.s,r.tf,name,r.t].join('|');if(!paper.some(x=>x.id===id))paper.push({id,s:r.s,tf:r.tf,name,d:r.g,at:now,entry:r.px,sl:r.pl.sl,tp:r.pl.tp,st:'open'})};
+ raw.forEach(r=>add(r,r.name));merged.forEach(r=>{if(r.agree.length>=2)add(r,'agree')});
  paper.forEach(x=>{if(x.st!=='open')return;const R=cache[x.s+x.tf];if(!R)return;let n=0;
   for(const k of R.slice(0,-1)){if(k.t<=x.at)continue;n++;let ex=null,st=null;
    if(x.d>0?k.l<=x.sl:k.h>=x.sl){ex=x.sl;st='sl'}else if(x.d>0?k.h>=x.tp:k.l<=x.tp){ex=x.tp;st='tp'}else if(n>=(x.name==='pb'?40:30)){ex=k.c;st='time'}
    if(st){x.st=st;x.pnl=x.d*(ex-x.entry)/x.entry*100-2*fee*100;break}}});savePaper()}
 function renderPaper(){const by={};paper.forEach(x=>{const b=by[x.name]=by[x.name]||{n:0,w:0,gp:0,gl:0,net:0,open:0};if(x.st==='open'){b.open++;return}b.n++;if(x.pnl>0){b.w++;b.gp+=x.pnl}else b.gl-=x.pnl;b.net+=x.pnl});
  const names=Object.keys(by);const last=[...paper].reverse().slice(0,6);
- $('paper').innerHTML=names.length?`<table><tr class="mut"><th>Strategy<th>Done<th>Win<th>PF<th>Net<th>Open</tr>${names.map(k=>{const b=by[k];return`<tr><td>${SNAME[k]}<td>${b.n}<td>${b.n?(b.w/b.n*100).toFixed(0)+'%':'-'}<td>${b.gl?(b.gp/b.gl).toFixed(2):b.gp?'∞':'-'}<td class="${b.net>=0?'ok':'no'}">${b.net.toFixed(1)}%<td>${b.open}</tr>`}).join('')}</table>
-  <div style="margin-top:4px">${last.map(x=>`<div>${x.d>0?'LONG':'SHORT'} ${x.s.replace('USDT','')} ${x.tf} ${SNAME[x.name]}: ${x.st==='open'?'<span class="mut">open</span>':`<span class="${x.pnl>=0?'ok':'no'}">${x.st==='tp'?'target hit':x.st==='sl'?'stopped':'timed out'} ${x.pnl.toFixed(2)}%</span>`}</div>`).join('')}</div>`
+ $('paper').innerHTML=names.length?`<table><tr class="mut"><th>Strategy<th>Done<th>Win<th>PF<th>Net<th>Open</tr>${names.map(k=>{const b=by[k];return`<tr><td>${PLAB[k]||k}<td>${b.n}<td>${b.n?(b.w/b.n*100).toFixed(0)+'%':'-'}<td>${b.gl?(b.gp/b.gl).toFixed(2):b.gp?'∞':'-'}<td class="${b.net>=0?'ok':'no'}">${b.net.toFixed(1)}%<td>${b.open}</tr>`}).join('')}</table>
+  <div style="margin-top:4px">${last.map(x=>`<div>${x.d>0?'LONG':'SHORT'} ${x.s.replace('USDT','')} ${x.tf} ${PLAB[x.name]||x.name}: ${x.st==='open'?'<span class="mut">open</span>':`<span class="${x.pnl>=0?'ok':'no'}">${x.st==='tp'?'target hit':x.st==='sl'?'stopped':'timed out'} ${x.pnl.toFixed(2)}%</span>`}</div>`).join('')}</div>`
   :'No signals logged yet. Every signal the room shows while this app is open is recorded here and settled automatically.'}
 function ping(s,d,tf){const t=`${d>0?'LONG':'SHORT'} entry ${s.replace('USDT','')} (${tf})`;
  try{const o=actx.createOscillator();o.connect(actx.destination);o.frequency.value=d>0?880:440;o.start();o.stop(actx.currentTime+.4)}catch{}
